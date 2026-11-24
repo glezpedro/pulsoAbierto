@@ -1,5 +1,5 @@
 import { html, useState } from '../../vendor/preact-htm.js';
-import { useApi, useStore, api, toast, n, ago, download, useEventTarget, dateTime } from '../core.js';
+import { useApi, useStore, store, api, toast, n, ago, download, useEventTarget, dateTime } from '../core.js';
 import { Card, Stat, Spinner } from '../ui.js';
 import { Page, SyncButton } from '../layout.js';
 import { strap, CONN } from '../ble/strap.js';
@@ -50,6 +50,7 @@ export function StrapView() {
           <button class="btn small" disabled=${!strap.connected} onClick=${() => strap.disableAlarm().then(() => toast('Alarma desactivada'))}>Quitar</button></div></div>
         <div class="small muted"><b>Cómo funciona la sincronización:</b> la pulsera guarda días de datos segundo a segundo. Al pulsar Sincronizar, Bluefy los descarga, los guarda primero en el móvil (para no perder nada) y después la pulsera borra solo lo confirmado. Luego se suben al servidor, que lo analiza todo. Mantén la pantalla encendida hasta que termine (1–3 min por día de datos).</div>
         <div class="small muted"><b>Primera vez:</b> cierra la app oficial de WHOOP (solo una app puede tener la pulsera), pulsa Conectar y acepta el emparejamiento de iOS.</div><//>
+      <${Card} span="12" title="Pulsera de segunda mano" icon=${html`<${Icon} n="watch" />`}><${SecondHand} status=${status} /><//>
       <${Card} span="6" title="Sincronizaciones" icon=${html`<${Icon} n="sync" />`}>
         ${(log.data || []).map((l) => html`<${Stat} k=${dateTime(l.ts)} v=${`${n(l.records)} registros · ${l.first_ts ? `${dateTime(l.first_ts)} → ${dateTime(l.last_ts)}` : ''}`} />`)}
         ${!log.data?.length && html`<div class="small muted">Sin sincronizaciones todavía.</div>`}<//>
@@ -65,4 +66,30 @@ export function StrapView() {
         <div class="log">${[...s.log].reverse().slice(0, 200).map((l) => html`<div class=${l.level}>${new Date(l.t).toLocaleTimeString('es-ES')} ${l.text}</div>`)}</div><//>
     </div>
   <//>`;
+}
+
+function SecondHand({ status }) {
+  const cut = status?.settings?.ignoreBefore;
+  const toLocal = (ts) => { const d = new Date(ts * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+  const [when, setWhen] = useState(cut ? toLocal(cut) : toLocal(Math.floor(Date.now() / 1000)));
+  const save = async (ts) => {
+    try {
+      await api('/settings', { method: 'PUT', json: { ignoreBefore: ts } });
+      store.set({ status: { ...status, settings: { ...status.settings, ignoreBefore: ts } } });
+      toast(ts ? `Se descartará todo lo grabado antes del ${new Date(ts * 1000).toLocaleString('es-ES')}` : 'Filtro quitado: se guardará todo');
+    } catch (e) { toast(e.message); }
+  };
+  return html`
+    <div class="small">Si la pulsera era de otra persona, su memoria puede tener días de datos suyos sin descargar. Pulso los <b>descarga y los descarta</b>: la pulsera libera la memoria de la forma normal (al confirmar cada bloque) y no se usa ningún comando de borrado. Así no se mezclan con tus métricas ni con tu línea base.</div>
+    ${cut
+      ? html`<div class="row"><span class="pill yellow">Descartando todo lo anterior a ${new Date(cut * 1000).toLocaleString('es-ES')}</span>
+          <span class="small muted">${n(status?.discardedPrevious || 0)} registros descartados hasta ahora</span></div>`
+      : html`<div class="row"><span class="pill">Sin filtro: se guarda todo</span></div>`}
+    <div class="row">
+      <button class="btn primary" onClick=${() => save(Math.floor(Date.now() / 1000))}>Descartar todo lo anterior a ahora</button>
+      <input type="datetime-local" value=${when} onChange=${(e) => setWhen(e.target.value)} style="width:auto" />
+      <button class="btn small" onClick=${() => save(Math.floor(new Date(when).getTime() / 1000))}>Usar esta fecha</button>
+      ${cut && html`<button class="btn small" onClick=${() => save(null)}>Quitar filtro</button>`}
+    </div>
+    <div class="small muted"><b>Orden recomendado al recibirla:</b> 1) el dueño anterior la elimina de su cuenta de WHOOP y la olvida en Ajustes › Bluetooth de su iPhone; 2) cárgala; 3) aquí, pulsa «Descartar todo lo anterior a ahora»; 4) conéctala y sincroniza (la primera descarga puede tardar varios minutos si tenía muchos días guardados; deja la pantalla encendida); 5) póntela. Puedes dejar el filtro puesto: solo afecta a datos anteriores a esa fecha.</div>`;
 }

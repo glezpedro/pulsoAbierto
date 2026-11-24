@@ -74,6 +74,7 @@ async def status():
                    "redirect": strava.REDIRECT},
         "hasAnthropic": bool(secret("anthropic")), "settings": s, "profile": profile(), "hrMax": hr_max(), "bmr": bmr(),
         "physio": physio(), "dirty": db.one("SELECT COUNT(*) c FROM days WHERE dirty=1")["c"],
+        "discardedPrevious": db.kv_get("discarded_previous", 0) or 0,
     }
 
 
@@ -115,13 +116,18 @@ async def post_samples(request: Request):
         n, first, last = await asyncio.to_thread(append_samples, blob)
     except ValueError as ex:
         raise HTTPException(400, str(ex))
+    received = len(blob) // 32
+    discarded = received - n
+    if discarded:
+        d = db.kv_get("discarded_previous", 0) or 0
+        db.kv_set("discarded_previous", d + discarded)
     if n:
         db.ex("INSERT INTO sync_log(ts, records, first_ts, last_ts, source) VALUES(?,?,?,?,?)", (now(), n, first, last, "bluefy"))
         db.kv_set("last_sync_ts", now())
         days = analysis.mark_dirty(first, last)
     else:
         days = []
-    return {"stored": n, "first": first, "last": last, "days": days}
+    return {"stored": n, "discarded": discarded, "first": first, "last": last, "days": days}
 
 
 @app.post("/api/device")

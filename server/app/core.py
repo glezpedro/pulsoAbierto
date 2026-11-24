@@ -85,6 +85,9 @@ DEFAULT_SETTINGS = {
     "stravaAutoUpload": False,
     "smartAlarm": False,
     "alarmWindow": 30,
+    # Second-hand strap: records older than this unix time are downloaded (so the strap frees its
+    # memory through the normal acknowledgement) but discarded instead of stored. None = keep all.
+    "ignoreBefore": None,
 }
 
 
@@ -182,10 +185,11 @@ def append_samples(blob: bytes) -> tuple[int, int, int]:
         return 0, 0, 0
     by_day: dict[int, list[bytes]] = {}
     first, last = 1 << 62, 0
+    cutoff = int(settings().get("ignoreBefore") or 0)
     for i in range(n):
         rec = blob[i * 32:(i + 1) * 32]
         ts = int.from_bytes(rec[0:4], "little")
-        if ts < 1_500_000_000 or ts > now() + 86400:
+        if ts < 1_500_000_000 or ts > now() + 86400 or ts < cutoff:
             continue
         first, last = min(first, ts), max(last, ts)
         by_day.setdefault(ts // 86400, []).append(rec)
