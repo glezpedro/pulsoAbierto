@@ -8,3 +8,5 @@ Packages/WhoopKit/.build/
 *.ipa
 Payload/
 xcuserdata/
+__pycache__/
+*.pyc
