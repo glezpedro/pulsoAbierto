@@ -19,10 +19,17 @@ export function SyncButton({ big }) {
   if (!strap.supported) {
     return big ? html`<div class="card"><b>Este navegador no puede usar Bluetooth.</b><span class="small muted">Abre esta web en <b>Bluefy</b> en el iPhone (o Chrome en el ordenador) para sincronizar la pulsera. Los datos ya sincronizados se ven desde cualquier navegador.</span></div>` : null;
   }
-  return html`<button class=${`btn ${big ? 'big primary' : 'small'}`} onClick=${onClick} disabled=${busy}>
+  const btn = html`<button class=${`btn ${big ? 'big primary' : 'small'}`} onClick=${onClick} disabled=${busy}>
     ${busy ? html`<span class="spinner"></span>` : html`<${Icon} n="sync" />`}
     ${busy ? (s.conn === 'syncing' ? `${s.records} registros…` : CONN[s.conn]) : strap.connected ? 'Sincronizar' : 'Conectar pulsera'}
   </button>`;
+  if (!big) return btn;
+  const connecting = ['choosing', 'connecting', 'pairing', 'handshaking'].includes(s.conn);
+  return html`<div class="col" style="gap:6px">
+    ${btn}
+    ${connecting && html`<button class="btn small" style="align-self:center" onClick=${() => strap.resetConnection()}>¿Atascado? Reiniciar conexión</button>`}
+    ${s.error && !busy && html`<div class="small bad" style="text-align:center">${s.error}</div>`}
+  </div>`;
 }
 
 export function StatusPill() {

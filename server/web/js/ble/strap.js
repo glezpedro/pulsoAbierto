@@ -3,6 +3,10 @@ import { UUID, TYPE, CMD, EVENTS, FrameAssembler, buildFrame, parse, decodeChunk
 import { queue, flush } from './queue.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const withTimeout = (p, ms, msg) => new Promise((resolve, reject) => {
+  const t = setTimeout(() => reject(new Error(msg)), ms);
+  Promise.resolve(p).then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+});
 
 export const CONN = {
   unsupported: 'Este navegador no tiene Bluetooth (usa Bluefy en iPhone)',
@@ -39,61 +43,98 @@ class Strap extends EventTarget {
   get connected() { return ['handshaking', 'ready', 'syncing', 'uploading'].includes(this.s.conn); }
 
   // ------------------------------------------------------------ connection
+  /** Tap on «Conectar pulsera». Order: reuse the device of this page → the strap already authorised
+   *  (it may still be linked to iOS from a previous visit and then does not show in the chooser) →
+   *  the chooser. Every step has a timeout so the button can never stay stuck. */
   async connect() {
     if (!navigator.bluetooth) throw new Error(CONN.unsupported);
-    this.set({ conn: 'choosing', error: null });
+    this.set({ error: null });
     try {
-      let device = null;
-      if (navigator.bluetooth.getDevices) {
-        try {
-          const known = await navigator.bluetooth.getDevices();
-          device = known.find((d) => d.id === localStorage.getItem('pulso.deviceId')) || null;
-        } catch { /* not supported */ }
+      if (this.device && !this.skipKnown) {
+        await this.openWithTimeout(this.device);
+        return;
       }
-      if (!device) {
-        device = await navigator.bluetooth.requestDevice({
-          filters: [{ services: [UUID.service] }, { namePrefix: 'WHOOP' }],
-          optionalServices: [UUID.service, 'heart_rate', 'battery_service'],
-        });
+      if (!this.skipKnown && navigator.bluetooth.getDevices) {
+        let known = null;
+        try { known = (await navigator.bluetooth.getDevices()).find((d) => d.id === localStorage.getItem('pulso.deviceId')) || null; } catch { /* unsupported */ }
+        if (known) { await this.openWithTimeout(known); return; }
       }
+      this.skipKnown = false;
+      this.set({ conn: 'choosing' });
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [UUID.service] }, { namePrefix: 'WHOOP' }],
+        optionalServices: [UUID.service, 'heart_rate', 'battery_service'],
+      });
       localStorage.setItem('pulso.deviceId', device.id);
-      this.device = device;
-      device.addEventListener('gattserverdisconnected', () => this.onDisconnect());
-      await this.open();
+      await this.openWithTimeout(device);
     } catch (e) {
-      this.set({ conn: this.device?.gatt?.connected ? this.s.conn : 'idle', error: e.message || String(e) });
-      this.log(`Error: ${e.message || e}`, 'error');
-      throw e;
+      const msg = e?.name === 'NotFoundError' ? 'No se eligió ninguna pulsera.' : (e.message || String(e));
+      this.fail(msg);
+      throw new Error(msg);
     }
   }
 
-  /** Silent reconnect to the already-authorised strap (no chooser). Works where the browser
-   *  implements getDevices(); otherwise the user taps «Conectar pulsera» once per visit. */
+  /** Silent reconnect when the page opens (only where the browser implements getDevices()). */
   async autoConnect() {
-    if (!navigator.bluetooth?.getDevices || this.connected) return false;
+    if (!navigator.bluetooth?.getDevices || this.connected || this.s.conn !== 'idle') return false;
     try {
       const id = localStorage.getItem('pulso.deviceId');
       const device = (await navigator.bluetooth.getDevices()).find((d) => d.id === id);
       if (!device) return false;
-      this.device = device;
-      device.addEventListener('gattserverdisconnected', () => this.onDisconnect());
-      await this.open();
+      await this.openWithTimeout(device);
       return true;
     } catch (e) {
       this.log(`Reconexión automática no disponible: ${e.message || e}`, 'warn');
-      this.set({ conn: 'idle' });
+      this.fail(null);
       return false;
     }
   }
 
+  async openWithTimeout(device) {
+    this.attach(device);
+    await withTimeout(this.open(), 60000, 'La pulsera no respondió a tiempo.');
+  }
+
+  attach(device) {
+    if (this.device !== device) {
+      this.device?.removeEventListener?.('gattserverdisconnected', this.onDiscBound);
+      this.device = device;
+      this.onDiscBound = this.onDiscBound || (() => this.onDisconnect());
+      device.addEventListener('gattserverdisconnected', this.onDiscBound);
+    }
+  }
+
+  /** Leaves everything ready for a clean retry. `msg` null = silent. */
+  fail(msg) {
+    try { if (this.device?.gatt?.connected) this.device.gatt.disconnect(); } catch { /* ignore */ }
+    for (const [, p] of this.pending) p.resolve(null);
+    this.pending.clear();
+    this.historyActive = false;
+    clearInterval(this.battTimer);
+    this.releaseWake();
+    // after a failed attempt with the remembered strap, the next tap goes straight to the chooser
+    this.skipKnown = true;
+    const hint = msg ? `${msg} Pulsa «Conectar pulsera» otra vez. Si la pulsera no aparece en la lista: en el iPhone ve a Ajustes › Bluetooth › WHOOP › ⓘ › Desconectar y vuelve a intentarlo.` : null;
+    this.set({ conn: 'idle', error: hint, prog: null, liveOn: false });
+    if (msg) this.log(`Error de conexión: ${msg}`, 'error');
+  }
+
+  /** Manual reset from the UI («¿Atascado? Reiniciar conexión»). */
+  resetConnection() {
+    this.fail(null);
+    this.skipKnown = false;
+    this.log('Conexión reiniciada manualmente.', 'warn');
+  }
+
   async open() {
     this.set({ conn: 'connecting', name: this.device.name || 'WHOOP' });
-    this.log(`Conectando a ${this.device.name || 'WHOOP'}…`);
-    const server = await this.device.gatt.connect();
-    this.chars = {}; this.asm = {};
-    const svc = await server.getPrimaryService(UUID.service);
+    const already = this.device.gatt.connected;
+    this.log(`${already ? 'Reutilizando la conexión con' : 'Conectando a'} ${this.device.name || 'WHOOP'}…`);
+    const server = already ? this.device.gatt : await withTimeout(this.device.gatt.connect(), 15000, 'No se pudo abrir la conexión Bluetooth.');
+    this.chars = {}; this.asm = {}; this.busyWrite = Promise.resolve();
+    const svc = await withTimeout(server.getPrimaryService(UUID.service), 10000, 'La pulsera no mostró su servicio.');
     for (const [k, u] of Object.entries({ cmdTo: UUID.cmdTo, cmdFrom: UUID.cmdFrom, events: UUID.events, data: UUID.data })) {
-      this.chars[k] = await svc.getCharacteristic(u);
+      this.chars[k] = await withTimeout(svc.getCharacteristic(u), 8000, 'La pulsera no respondió.');
     }
     try { this.chars.memfault = await svc.getCharacteristic(UUID.memfault); } catch { /* optional */ }
     try {
@@ -105,7 +146,7 @@ class Strap extends EventTarget {
     this.set({ conn: 'pairing' });
     for (let attempt = 1; attempt <= 4; attempt++) {
       try {
-        await this.rawWrite(buildFrame(TYPE.command, this.nextSeq(), CMD.getBattery, [0]));
+        await withTimeout(this.rawWrite(buildFrame(TYPE.command, this.nextSeq(), CMD.getBattery, [0])), 10000, 'tiempo agotado');
         break;
       } catch (e) {
         this.log(`Escritura rechazada (${e.message}). Acepta el emparejamiento de iOS… (${attempt}/4)`, 'warn');
@@ -386,3 +427,18 @@ class Strap extends EventTarget {
 }
 
 export const strap = new Strap();
+
+// Al salir de la página se suelta la conexión para que la próxima visita pueda conectar sin bloqueo.
+window.addEventListener('pagehide', () => { if (strap.device?.gatt?.connected) { try { strap.device.gatt.disconnect(); } catch { /* ignore */ } } });
+// Al volver a la app: si el enlace murió mientras estaba en segundo plano, reflejarlo.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && strap.device && !strap.device.gatt?.connected && strap.connected) strap.onDisconnect();
+});
+// Vigilante: ningún estado de conexión puede quedarse colgado más de 75 s.
+let stuckSince = 0;
+setInterval(() => {
+  const busy = ['connecting', 'pairing', 'handshaking'].includes(strap.s.conn);
+  if (!busy) { stuckSince = 0; return; }
+  stuckSince = stuckSince || Date.now();
+  if (Date.now() - stuckSince > 75000) { stuckSince = 0; strap.fail('La conexión se quedó atascada.'); }
+}, 5000);
