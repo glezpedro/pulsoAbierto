@@ -15,12 +15,14 @@ export function SettingsView() {
   return html`<${Page} title="Ajustes">
     <div class="grid">
       <${Card} span="6" title="Perfil" icon=${html`<${Icon} n="body" />`}><${Profile} p=${status.profile} hrMax=${status.hrMax} /><//>
-      <${Card} span="6" title="Coach IA (Claude)" icon=${html`<${Icon} n="spark" />`}><${AI} status=${status} /><//>
       <${Card} span="6" title="Telegram" icon=${html`<${Icon} n="send" />`}><${Telegram} status=${status} /><//>
       <${Card} span="6" title="Notificaciones" icon=${html`<${Icon} n="send" />`}><${Notifs} s=${status.settings} /><//>
       <${Card} span="6" title="Strava" icon=${html`<${Icon} n="trend" />`}><${Strava} st=${status.strava} /><//>
       <${Card} span="6" title="Strong y Apple Salud" icon=${html`<${Icon} n="dumbbell" />`}><${Health} s=${status.settings} /><//>
       <${Card} span="12" title="Datos" icon=${html`<${Icon} n="report" />`}><${Data} status=${status} /><//>
+      <${Card} span="12" title="Coach IA (opcional, de pago)" icon=${html`<${Icon} n="spark" />`}>
+        <details><summary class="small muted" style="cursor:pointer">Pulso funciona completo sin IA. Si algún día quieres el chat con Claude, el análisis redactado o planes generados por IA, configúralo aquí.</summary>
+          <div class="col" style="margin-top:10px"><${AI} status=${status} /></div></details><//>
     </div>
   <//>`;
 }

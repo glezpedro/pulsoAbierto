@@ -30,11 +30,12 @@ export const ROUTES = [
   { id: 'entreno', title: 'Entreno', icon: 'dumbbell', view: TrainingView, group: 'Entreno' },
   { id: 'directo', title: 'En directo', icon: 'live', view: LiveView, group: 'Entreno' },
   { id: 'cuerpo', title: 'Medidas', icon: 'body', view: BodyView, group: 'Entreno' },
-  { id: 'coach', title: 'Coach IA', icon: 'spark', view: CoachView, group: 'Entreno' },
+  // Coach IA oculto de la navegación mientras no se use (la API de Anthropic es de pago). Sigue en #/coach.
+  { id: 'coach', title: 'Coach IA', icon: 'spark', view: CoachView, group: 'Entreno', hidden: true },
   { id: 'pulsera', title: 'Pulsera', icon: 'watch', view: StrapView, group: 'Sistema' },
   { id: 'ajustes', title: 'Ajustes', icon: 'gear', view: SettingsView, group: 'Sistema' },
 ];
-const TABS = ['hoy', 'sueno', 'carga', 'coach', 'mas'];
+const TABS = ['hoy', 'sueno', 'carga', 'pulsera', 'mas'];
 
 function useRoute() {
   const parse = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || 'hoy');
@@ -67,18 +68,19 @@ poll();
 setTimeout(() => strap.autoConnect().catch(() => {}), 800);
 
 function Sidebar({ route }) {
-  const groups = [...new Set(ROUTES.map((r) => r.group))];
+  const visible = ROUTES.filter((r) => !r.hidden);
+  const groups = [...new Set(visible.map((r) => r.group))];
   return html`<aside class="sidebar">
     <div class="brand"><img class="brand-logo" src="/icon.svg" alt="" /><b>Pulso</b></div>
     <div class="hide-mobile"><${SyncButton} /></div>
     ${groups.map((g) => html`<nav class="nav nav-group"><span class="label">${g}</span>
-      ${ROUTES.filter((r) => r.group === g).map((r) => html`<a href=${`#/${r.id}`} class=${route === r.id ? 'active' : ''}><span class="ic"><${Icon} n=${r.icon} /></span>${r.title}</a>`)}
+      ${visible.filter((r) => r.group === g).map((r) => html`<a href=${`#/${r.id}`} class=${route === r.id ? 'active' : ''}><span class="ic"><${Icon} n=${r.icon} /></span>${r.title}</a>`)}
     </nav>`)}
   </aside>`;
 }
 
 function TabBar({ route }) {
-  const items = { hoy: ['Hoy', 'today'], sueno: ['Sueño', 'sleep'], carga: ['Carga', 'bolt'], coach: ['Coach', 'spark'], mas: ['Más', 'grid'] };
+  const items = { hoy: ['Hoy', 'today'], sueno: ['Sueño', 'sleep'], carga: ['Carga', 'bolt'], pulsera: ['Pulsera', 'watch'], mas: ['Más', 'grid'] };
   const inMore = !TABS.includes(route);
   return html`<nav class="tabbar">${TABS.map((t) => html`<a href=${`#/${t}`} class=${route === t || (t === 'mas' && inMore) ? 'active' : ''}>
     <span class="ic"><${Icon} n=${items[t][1]} size=${22} /></span>${items[t][0]}</a>`)}</nav>`;
@@ -88,7 +90,7 @@ function MoreView() {
   return html`<div class="page">
     <div class="topbar"><h1>Más</h1><${StatusPill} /></div>
     <${SyncButton} big />
-    <div class="card">${ROUTES.filter((r) => !TABS.includes(r.id)).map((r) => html`
+    <div class="card">${ROUTES.filter((r) => !TABS.includes(r.id) && !r.hidden).map((r) => html`
       <a class="list-item" href=${`#/${r.id}`} style="color:inherit"><span class="ic"><${Icon} n=${r.icon} /></span><span class="grow">${r.title}</span><${Icon} n="chev" /></a>`)}
     </div></div>`;
 }

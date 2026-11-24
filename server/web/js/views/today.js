@@ -46,7 +46,7 @@ export function TodayView() {
         <${PlanCard} plan=${plan.data} />
       </div>
       <${Card} span="12" title="Métricas clave" icon=${html`<${Icon} n="heart" />`}><${KeyTiles} m=${m} base=${data.baseline} showSpO2=${status?.settings?.showSpO2} /><//>
-      <${Card} span="6" title="Análisis del día" icon=${html`<${Icon} n="spark" />`}><${Analysis} data=${data} /><//>
+      <${Card} span="6" title="Resumen del día" icon=${html`<${Icon} n="report" />`}><${Analysis} data=${data} /><//>
       <${Card} span="6" title="Noche" icon=${html`<${Icon} n="sleep" />`} right=${html`<a href="#/sueno" class="small">Ver sueño</a>`}><${SleepMini} m=${m} rep=${rep} /><//>
       <${Card} span="12" title="Frecuencia cardiaca y sensores" icon=${html`<${Icon} n="live" />`}><${DayChart} date=${date} rep=${rep} /><//>
       <${Card} span="6" title="Estrés" icon=${html`<${Icon} n="stress" />`}><${StressChart} rep=${rep} m=${m} /><//>
@@ -131,7 +131,7 @@ function Analysis({ data }) {
     <div class="row">
       ${status?.hasAnthropic
         ? html`<button class="btn small" onClick=${run} disabled=${busy}>${busy ? html`<span class="spinner"></span>` : html`<${Icon} n="spark" />`}${data.ai ? 'Regenerar' : 'Analizar con IA'}</button>`
-        : html`<span class="small muted">Añade tu clave de Anthropic en <a href="#/ajustes">Ajustes</a> para el análisis con IA.</span>`}
+        : null}
       ${data.aiAt && html`<span class="tiny faint">${new Date(data.aiAt * 1000).toLocaleString('es-ES')}</span>`}
     </div>`;
 }

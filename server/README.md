@@ -55,8 +55,9 @@ El script hace todo esto:
 | **Informe semanal** | Indicadores frente a la semana anterior, día a día, sueño (deuda y regularidad), carga, zonas, entrenos, hábitos e informe redactado por IA. Se envía a Telegram |
 | **Entreno** | Planes periodizados (generador propio o IA) adaptados a cada día, historial unificado (pulsera, directo, Strong, Strava), detalle de cada sesión con FC y zonas, subida a Strava con la curva de FC, progresión de 1RM, récords, series por músculo y volumen semanal |
 | **En directo** | FC en vivo con zonas, esfuerzo y calorías en tiempo real, grabación de entrenos (también con doble toque en la pulsera), medición de VFC de 2 minutos y respiración guiada con biofeedback |
-| **Pulsera** | Conexión, sincronización, batería, firmware, despertador, vibración, FC por Bluetooth estándar, registro y captura de tramas crudas |
-| **Medidas, Diario, Coach** | Composición corporal y evolución, hábitos con su impacto en la recuperación, chat con IA (también por Telegram) |
+| **Pulsera** | Batería con estimaciones (cuánto le queda, hora a la que se agota, tiempo hasta la carga completa, autonomía real por carga e historial), conexión, sincronización, firmware, despertador, vibración, FC por Bluetooth estándar, pulsera de segunda mano, registro y captura de tramas crudas |
+| **Medidas, Diario** | Composición corporal y evolución, hábitos con su impacto en la recuperación |
+| **Coach IA** (opcional) | Oculto mientras no haya clave de Anthropic (es de pago). Con clave: chat, análisis redactado, planes con IA y respuestas por Telegram |
 
 **Telegram** envía:
 - un resumen de la mañana al sincronizar;

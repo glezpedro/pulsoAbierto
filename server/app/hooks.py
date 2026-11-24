@@ -112,6 +112,14 @@ async def tick() -> None:
         if not db.was_notified(key):
             db.mark_notified(key)
             await telegram.send(f"📡 Llevas {int((now() - last) / 3600)} h sin sincronizar la pulsera. Abre Pulso en Bluefy un par de minutos.")
+    # battery won't last the night → warn once in the evening (20:00–23:30)
+    if s["notifyBattery"] and "20:00" <= hhmm <= "23:30" and not db.was_notified(f"battery-night-{tk}"):
+        from . import battery
+        e = battery.estimate()
+        if e.get("known") and not e["charging"] and e.get("emptyAt") and e["emptyAt"] < next_wake() + 3600:
+            db.mark_notified(f"battery-night-{tk}")
+            await telegram.send(f"🔋 A la pulsera le quedan **~{battery.fmt_h(e['remainingHours'])}** ({e['estimated']:.0f} %): no llega a mañana. "
+                                f"Cárgala antes de dormir para no perder los datos de sueño (unos {battery.fmt_h((99 - e['estimated']) / e['chargePerHour'])} de carga).")
     # Strava import every 60 min
     from . import strava
     if strava.connected() and now() - (strava.cfg().get("last_import") or 0) > 3600:

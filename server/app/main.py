@@ -12,7 +12,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import analysis, db, hooks, reports, strava, telegram
+from . import analysis, battery, db, hooks, reports, strava, telegram
 from .config import ALLOWED_LOGINS, DB_PATH, DISABLE_BACKGROUND, SAMPLES_DIR, WEB_DIR
 from .core import (EngineError, add_days, append_samples, day_bounds, day_key, engine, hr_max, local, now, physio,
                    profile, sample_stats, secret, settings, today_key, week_key, bmr, DEFAULT_PROFILE, DEFAULT_SETTINGS)
@@ -75,6 +75,7 @@ async def status():
         "hasAnthropic": bool(secret("anthropic")), "settings": s, "profile": profile(), "hrMax": hr_max(), "bmr": bmr(),
         "physio": physio(), "dirty": db.one("SELECT COUNT(*) c FROM days WHERE dirty=1")["c"],
         "discardedPrevious": db.kv_get("discarded_previous", 0) or 0,
+        "battery": battery.estimate(),
     }
 
 
@@ -136,8 +137,17 @@ async def post_device(p: dict = Body(...)):
     d.update({k: v for k, v in p.items() if v is not None})
     d["seen"] = now()
     db.kv_set("device", d)
+    if p.get("battery") is not None:
+        battery.record(p["battery"], bool(p.get("charging")), p.get("mv"), p.get("source") or "bluefy")
     hooks.battery_check(p.get("battery"), bool(p.get("charging")))
     return d
+
+
+@app.get("/api/battery")
+async def get_battery(days: int = 14):
+    e = battery.estimate()
+    e["history"] = battery.readings(days)
+    return e
 
 
 @app.post("/api/events")
@@ -810,6 +820,23 @@ async def demo(p: dict = Body(default={})):
         db.ex("INSERT OR IGNORE INTO journal(day_key, answers, notes, updated_at) VALUES(?,?,?,?)", (k, json.dumps(ans), "", now()))
     db.kv_set("last_sync_ts", now())
     db.kv_set("device", {"battery": 76, "charging": False, "name": "WHOOP 4C0000000 (demo)", "firmware": "MAXIM 41.17.6.0 · NORDIC 17.2.2.0", "seen": now()})
+    if not db.one("SELECT 1 FROM battery"):
+        t0 = now() - 9 * 86400
+        lvl, ts = 100.0, t0
+        while ts < now():                       # demo: ≈ 4.6 days per charge, ~2 readings a day, charge 1 h 40 min
+            if lvl <= 12:
+                for k in range(6):
+                    battery.record(min(100, lvl + k * 18), True, None, "demo", ts + k * 1000)
+                ts += 6000; lvl = 100.0
+                continue
+            battery.record(lvl, False, 3700 + int(lvl * 4), "demo", ts)
+            step = 6 * 3600 + random.randint(0, 6 * 3600)
+            ts += step; lvl -= step / 3600 * (100 / 110)
+        lvl = max(15.0, lvl)
+        battery.record(round(lvl, 1), False, 3700 + int(lvl * 4), "demo", now() - 600)
+        d = db.kv_get("device", {}) or {}
+        d["battery"] = round(lvl)
+        db.kv_set("device", d)
     keys = await analysis.reanalyze_all()
     return {"written": res.get("written"), "queued": keys}
 
@@ -820,7 +847,7 @@ async def wipe(p: dict = Body(...)):
         raise HTTPException(400, "Escribe BORRAR para confirmar")
     for f in SAMPLES_DIR.glob("*.bin"):
         f.unlink()
-    for t in ("days", "workouts", "body", "journal", "plans", "chat", "events", "weekly", "sync_log", "spot", "health", "notified"):
+    for t in ("days", "workouts", "body", "journal", "plans", "chat", "events", "weekly", "sync_log", "spot", "health", "notified", "battery"):
         db.ex(f"DELETE FROM {t}")
     db.kv_del("last_sync_ts")
     db.kv_del("device")

@@ -35,7 +35,7 @@ function PlanTab() {
   const active = plans.data?.find((p) => p.active)?.plan;
   const wi = week ?? (active ? Math.max(0, Math.min(active.weeks.length - 1, Math.floor((Date.now() / 1000 - active.startDate) / (7 * 86400)))) : 0);
   return html`<div class="grid">
-    ${!active && html`<${Card} span="12"><${Empty} icon="🏋️" title="Sin plan activo">Genera un plan periodizado (local o con IA). Cada día se adapta a tu recuperación.<//>
+    ${!active && html`<${Card} span="12"><${Empty} icon="🏋️" title="Sin plan activo">Genera un plan periodizado según tu objetivo. Cada día se adapta a tu recuperación.<//>
       <button class="btn primary" onClick=${() => setBuilder(true)}><${Icon} n="plus" />Crear plan</button><//>`}
     ${active && html`
       <${Card} span="7" title=${active.name} icon=${html`<${Icon} n=${active.source === 'ia' ? 'spark' : 'dumbbell'} />`} right=${html`<button class="btn small" onClick=${() => setBuilder(true)}><${Icon} n="plus" />Nuevo</button>`}>
@@ -100,7 +100,7 @@ function PlanBuilder({ open, onClose }) {
     </div>
     <div class="field"><label>Músculos prioritarios</label><div class="chips">${MUSCLES.map(([k, l]) => html`<button class=${`chip ${req.priorityMuscles.includes(k) ? 'on' : ''}`}
       onClick=${() => up('priorityMuscles', req.priorityMuscles.includes(k) ? req.priorityMuscles.filter((x) => x !== k) : [...req.priorityMuscles, k])}>${l}</button>`)}</div></div>
-    <label class="switch"><span>Generar con IA (usa tus datos, 1RM de Strong y recuperación)${!status?.hasAnthropic ? ' — requiere clave de Anthropic' : ''}</span><input type="checkbox" checked=${ai} disabled=${!status?.hasAnthropic} onChange=${(e) => setAi(e.target.checked)} /></label>
+    ${status?.hasAnthropic && html`<label class="switch"><span>Generar con IA (usa tus datos, 1RM de Strong y recuperación)</span><input type="checkbox" checked=${ai} onChange=${(e) => setAi(e.target.checked)} /></label>`}
     ${ai && html`<div class="field"><label>Indicaciones extra</label><textarea value=${extra} onInput=${(e) => setExtra(e.target.value)} placeholder="Lesiones, horarios, deportes que practicas…"></textarea></div>`}
     <div class="row"><button class="btn primary" onClick=${gen} disabled=${busy}>${busy ? html`<span class="spinner"></span>` : null}${busy && ai ? 'La IA está diseñando tu plan (1–3 min)…' : 'Generar'}</button></div>
     ${preview && html`<div class="card" style="background:var(--panel-2)"><b>${preview.name}</b><div class="small muted">${preview.summary}</div>

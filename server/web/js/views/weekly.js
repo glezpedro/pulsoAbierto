@@ -39,10 +39,10 @@ export function WeeklyView() {
             <div class="d">${x.prev != null ? html`<${Delta} cur=${x.cur} prev=${x.prev} digits=${d} higherIsBetter=${x.higherIsBetter} /> <span class="muted">vs semana anterior</span>` : html`<span class="muted">sin semana previa</span>`}</div></div>`;
         })}</div><//>
       <${Card} span="7" title="Día a día" icon=${html`<${Icon} n="today" />`}><${Daily} r=${r} /><//>
-      <${Card} span="5" title="Resumen del coach" icon=${html`<${Icon} n="spark" />`}>
-        ${r.ai ? html`<${Md} text=${r.ai} />` : html`<div class="small muted">${status?.hasAnthropic ? 'Genera un informe redactado con tendencias, qué ha ido bien y objetivos para la próxima semana.' : 'Añade tu clave de Anthropic en Ajustes para el informe redactado.'}</div>`}
+      <${Card} span="5" title="Resumen" icon=${html`<${Icon} n="report" />`}>
+        ${r.ai ? html`<${Md} text=${r.ai} />` : html`<${Md} text=${weeklySummary(r)} />`}
         <div class="row">
-          ${status?.hasAnthropic && html`<button class="btn small" disabled=${!!busy} onClick=${genAI}>${busy === 'ai' ? html`<span class="spinner"></span>` : html`<${Icon} n="spark" />`}${r.ai ? 'Regenerar' : 'Generar informe IA'}</button>`}
+          ${status?.hasAnthropic && html`<button class="btn small" disabled=${!!busy} onClick=${genAI}>${busy === 'ai' ? html`<span class="spinner"></span>` : html`<${Icon} n="spark" />`}${r.ai ? 'Regenerar con IA' : 'Redactar con IA'}</button>`}
           <button class="btn small" disabled=${!!busy} onClick=${send}><${Icon} n="send" />Enviar a Telegram</button>
         </div><//>
       <${Card} span="4" title="Sueño" icon=${html`<${Icon} n="sleep" />`}>
@@ -87,4 +87,28 @@ function Daily({ r }) {
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Día</th><th>Rec.</th><th>Esfuerzo</th><th>VFC</th><th>FC rep.</th><th>Sueño</th><th>Estrés</th><th>kcal</th></tr></thead><tbody>
       ${d.map((x, i) => html`<tr><td>${labels[i]}</td><td style=${{ color: recColor(x.recovery), fontWeight: 700 }}>${n(x.recovery)}</td><td>${n(x.strain, 1)}</td><td>${n(x.hrv)}</td><td>${n(x.rhr)}</td><td>${x.sleptMin != null ? hm(x.sleptMin) : '–'}</td><td>${n(x.avgStress, 1)}</td><td>${n(x.kcal)}</td></tr>`)}
     </tbody></table></div>`;
+}
+
+/** Free rule-based weekly summary (no AI). */
+function weeklySummary(r) {
+  const k = r.kpis, out = [];
+  const d = (key) => (k[key]?.cur != null && k[key]?.prev != null ? k[key].cur - k[key].prev : null);
+  if (k.recovery?.cur != null) {
+    const dr = d('recovery');
+    out.push(`- **Recuperación media ${n(k.recovery.cur)} %**${dr != null ? ` (${dr >= 0 ? '+' : ''}${n(dr)} vs semana anterior)` : ''}: ${r.recoveryBands.green} días verdes, ${r.recoveryBands.yellow} amarillos y ${r.recoveryBands.red} rojos.`);
+  }
+  const dh = d('hrv');
+  if (k.hrv?.cur != null) out.push(`- **VFC ${n(k.hrv.cur)} ms**${dh != null ? (dh > 2 ? ', al alza: buena adaptación' : dh < -2 ? ', a la baja: vigila carga, sueño y estrés' : ', estable') : ''}.`);
+  const debt = r.sleep.debtMin;
+  if (k.sleptMin?.cur != null) out.push(`- **Sueño medio ${hm(k.sleptMin.cur)}**${debt > 60 ? `, con **${hm(debt)} de deuda** acumulada` : ', cubriendo tu necesidad'}${r.sleep.bedtimeSD > 45 ? '. Horarios irregulares (± ' + n(r.sleep.bedtimeSD) + ' min al acostarte)' : ''}.`);
+  out.push(`- **Entreno**: ${r.training.count} sesiones, esfuerzo total ${n(r.training.totalStrain)}${r.training.strongVolumeKg ? `, ${n(r.training.strongVolumeKg / 1000, 1)} t levantadas` : ''}. ${r.load.status}${r.load.acwr ? ` (ACWR ${n(r.load.acwr, 2)})` : ''}.`);
+  const goals = [];
+  if (debt > 120) goals.push('acostarte 30 min antes hasta recuperar la deuda de sueño');
+  if (r.sleep.bedtimeSD > 45) goals.push('acostarte a la misma hora (±30 min) todos los días');
+  if (r.load.acwr > 1.3) goals.push('bajar un 20 % el volumen para no pasarte de carga');
+  if (r.load.acwr != null && r.load.acwr < 0.8 && k.recovery?.cur >= 60) goals.push('subir algo la carga: tu cuerpo lo tolera');
+  if (r.recoveryBands.red >= 2) goals.push('meter un día extra de descanso activo');
+  if (!goals.length) goals.push('mantener la rutina: la semana ha ido equilibrada');
+  out.push(`\n**Para la próxima semana:** ${goals.join('; ')}.`);
+  return out.join('\n');
 }

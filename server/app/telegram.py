@@ -173,9 +173,13 @@ def load_text() -> str:
 
 # ---------------------------------------------------------------- bot loop
 
-HELP = ("Comandos:\n/hoy – resumen del día\n/sueno – última noche\n/semana – informe semanal\n/carga – carga de entrenamiento\n"
-        "/plan – entreno de hoy\n/bateria – estado de la pulsera\n/coach <pregunta> – pregunta al coach IA\n"
-        "También puedes escribirme cualquier pregunta directamente.")
+HELP_BASE = ("Comandos:\n/hoy – resumen del día\n/sueno – última noche\n/semana – informe semanal\n/carga – carga de entrenamiento\n"
+             "/plan – entreno de hoy\n/bateria – batería y cuánto le queda")
+HELP_AI = "\n/coach <pregunta> – pregunta al coach IA\nTambién puedes escribirme cualquier pregunta directamente."
+
+
+def help_text() -> str:
+    return HELP_BASE + (HELP_AI if secret("anthropic") else "")
 
 
 async def handle(msg: dict) -> None:
@@ -188,13 +192,13 @@ async def handle(msg: dict) -> None:
         if text.startswith("/start") and text.split()[-1] == pairing_code():
             db.kv_set("secret:telegram_chat", cid)
             db.kv_del("telegram_pair_code")
-            await send("✅ Pulso vinculado. Te avisaré cada mañana con tu recuperación.\n\n" + HELP, chat=cid)
+            await send("✅ Pulso vinculado. Te avisaré cada mañana con tu recuperación.\n\n" + help_text(), chat=cid)
         else:
             await send("Este bot es privado. Vincúlalo desde Pulso › Ajustes › Telegram con /start CÓDIGO.", chat=cid, markdown=False)
         return
     cmd = text.split()[0].split("@")[0].lower()
     if cmd in ("/start", "/ayuda", "/help"):
-        await send(HELP)
+        await send(help_text())
     elif cmd == "/hoy":
         await send(today_text())
     elif cmd in ("/sueno", "/sueño"):
@@ -207,10 +211,21 @@ async def handle(msg: dict) -> None:
         from .main import today_session_text
         await send(await today_session_text())
     elif cmd in ("/bateria", "/batería"):
-        d = db.kv_get("device", {}) or {}
+        from . import battery
+        e = battery.estimate()
         last = db.kv_get("last_sync_ts")
-        await send(f"🔋 Batería {d.get('battery', '–')} %{' (cargando)' if d.get('charging') else ''}\n"
-                   f"Última sincronización: {local(last).strftime('%d/%m %H:%M') if last else 'nunca'}")
+        lines = [f"**{battery.summary_text(e)}**"]
+        if e.get("known"):
+            if e["charging"]:
+                lines.append(f"Llena hacia las {local(e['fullAt']).strftime('%H:%M')} · después ~{e['afterChargeDays']} días de autonomía")
+            else:
+                lines.append(f"Se agota hacia el {local(e['emptyAt']).strftime('%a %d/%m %H:%M')}")
+                lines.append(f"Gasto {e['dischargePerDay']} %/día ({e['dischargeSource']}) · autonomía ~{e['fullLifeDays']} días por carga")
+            lines.append(f"Última lectura: {local(e['lastReading']).strftime('%d/%m %H:%M')} (estimación {e['confidence']})")
+        lines.append(f"Última sincronización: {local(last).strftime('%d/%m %H:%M') if last else 'nunca'}")
+        await send("\n".join(lines))
+    elif not secret("anthropic"):
+        await send(("El coach IA no está activado.\n\n" if cmd == "/coach" else "") + help_text())
     else:
         q = text[len("/coach"):].strip() if cmd == "/coach" else text
         if not q:
@@ -248,8 +263,8 @@ async def loop() -> None:
                 await api("setMyCommands", commands=[
                     {"command": "hoy", "description": "Resumen del día"}, {"command": "sueno", "description": "Última noche"},
                     {"command": "semana", "description": "Informe semanal"}, {"command": "carga", "description": "Carga de entrenamiento"},
-                    {"command": "plan", "description": "Entreno de hoy"}, {"command": "bateria", "description": "Estado de la pulsera"},
-                    {"command": "coach", "description": "Pregunta al coach IA"}])
+                    {"command": "plan", "description": "Entreno de hoy"}, {"command": "bateria", "description": "Batería y cuánto le queda"}]
+                    + ([{"command": "coach", "description": "Pregunta al coach IA"}] if secret("anthropic") else []))
             state["running"] = True
             params = {"timeout": 50, "allowed_updates": ["message"]}
             if offset:

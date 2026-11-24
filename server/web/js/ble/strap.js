@@ -142,6 +142,9 @@ class Strap extends EventTarget {
     if (b) this.set({ battery: read.battery(b) });
     this.set({ conn: 'ready' });
     this.postDevice();
+    // Battery readings every 60 s while connected: they feed the time-left / time-to-full estimates.
+    clearInterval(this.battTimer);
+    this.battTimer = setInterval(() => { if (this.connected && !this.historyActive) this.refreshBattery().catch(() => {}); }, 60000);
     await sleep(800);
     await this.syncHistory();
   }
@@ -152,6 +155,7 @@ class Strap extends EventTarget {
     this.pending.clear();
     const wasSync = this.historyActive;
     this.historyActive = false;
+    clearInterval(this.battTimer);
     this.releaseWake();
     this.set({ conn: 'disconnected', liveOn: false, liveHR: null });
     if (wasSync) this.upload();
@@ -243,7 +247,7 @@ class Strap extends EventTarget {
     const label = EVENTS[e.code] || `Evento ${e.code}`;
     this.log(`Evento: ${label}`, 'rx');
     const p = {};
-    if (e.code === 3 && e.battery != null) { p.battery = e.battery; p.charging = e.charging; }
+    if (e.code === 3 && e.battery != null) { p.battery = e.battery; p.charging = e.charging; if (e.mv) p.mv = e.mv; }
     if (e.code === 7) p.charging = true;
     if (e.code === 8) p.charging = false;
     if (e.code === 9) p.worn = true;
@@ -321,7 +325,7 @@ class Strap extends EventTarget {
   postDevice() {
     const s = this.s;
     fetch('/api/device', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ battery: s.battery, charging: s.charging, worn: s.worn, serial: s.serial, firmware: s.firmware, name: s.name, clock: s.clock ? Math.floor(s.clock / 1000) : null }) }).catch(() => {});
+      body: JSON.stringify({ battery: s.battery, charging: s.charging, mv: s.mv, worn: s.worn, serial: s.serial, firmware: s.firmware, name: s.name, clock: s.clock ? Math.floor(s.clock / 1000) : null }) }).catch(() => {});
   }
 
   // ------------------------------------------------------------ actions
@@ -329,7 +333,12 @@ class Strap extends EventTarget {
   async buzz() { await this.send(CMD.runHaptics, payload.haptics()); await this.send(CMD.runAlarm, [1]); }
   async setAlarm(date) { const r = await this.send(CMD.setAlarm, payload.alarm(date)); return r?.result === 1; }
   async disableAlarm() { await this.send(CMD.disableAlarm, [1]); }
-  async refreshBattery() { const b = await this.send(CMD.getBattery); if (b) { this.set({ battery: read.battery(b) }); this.postDevice(); } }
+  async refreshBattery() {
+    const b = await this.send(CMD.getBattery);
+    const v = b ? read.battery(b) : null;
+    if (v != null) { this.set({ battery: v }); this.postDevice(); this.dispatchEvent(new Event('battery')); }
+    return v;
+  }
   async reboot() { await this.send(CMD.reboot, [0]); }
 
   setRaw(on) { this.set({ raw: on }); if (!on) { this.rawFrames = []; this.set({ rawCount: 0 }); } }
