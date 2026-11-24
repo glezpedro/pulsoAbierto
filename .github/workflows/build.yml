@@ -1,0 +1,43 @@
+name: Compilar Pulso
+
+# Compila la app en un Mac de GitHub (gratis en repos públicos) y genera un .ipa sin firmar
+# listo para instalar con SideStore / AltStore / Sideloadly usando tu Apple ID gratuito.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests del núcleo (WhoopKit)
+        run: cd Packages/WhoopKit && swift test
+
+  ipa:
+    runs-on: macos-15
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || true
+      - name: Generar proyecto
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Compilar (sin firma)
+        run: |
+          xcodebuild -project Pulso.xcodeproj -scheme Pulso -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: Empaquetar .ipa (firma ad-hoc con entitlements para que el re-firmado los conserve)
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/Pulso.app Payload/
+          codesign --force --sign - --entitlements Pulso/Resources/Pulso.entitlements Payload/Pulso.app
+          zip -qr Pulso.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Pulso-ipa
+          path: Pulso.ipa
