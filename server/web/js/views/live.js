@@ -13,6 +13,8 @@ export function LiveView() {
   useEventTarget(strap);
   const connected = strap.connected;
   useEffect(() => { if (connected && !strap.s.liveOn) strap.setLive(true).catch(() => {}); }, [connected]);
+  // Al salir de esta pantalla se apaga la emisión de FC estándar para no gastar batería.
+  useEffect(() => () => { if (strap.connected && strap.s.liveOn) strap.setLive(false).catch(() => {}); }, []);
   return html`<${Page} title="En directo" right=${html`<${Seg} value=${tab} onChange=${setTab} options=${[['hr', 'Entreno'], ['hrv', 'VFC matinal'], ['breathe', 'Respiración']]} />`}>
     ${!connected && html`<${SyncButton} big />`}
     ${tab === 'hr' && html`<${WorkoutRecorder} />`}

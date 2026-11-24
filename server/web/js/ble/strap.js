@@ -66,6 +66,25 @@ class Strap extends EventTarget {
     }
   }
 
+  /** Silent reconnect to the already-authorised strap (no chooser). Works where the browser
+   *  implements getDevices(); otherwise the user taps «Conectar pulsera» once per visit. */
+  async autoConnect() {
+    if (!navigator.bluetooth?.getDevices || this.connected) return false;
+    try {
+      const id = localStorage.getItem('pulso.deviceId');
+      const device = (await navigator.bluetooth.getDevices()).find((d) => d.id === id);
+      if (!device) return false;
+      this.device = device;
+      device.addEventListener('gattserverdisconnected', () => this.onDisconnect());
+      await this.open();
+      return true;
+    } catch (e) {
+      this.log(`Reconexión automática no disponible: ${e.message || e}`, 'warn');
+      this.set({ conn: 'idle' });
+      return false;
+    }
+  }
+
   async open() {
     this.set({ conn: 'connecting', name: this.device.name || 'WHOOP' });
     this.log(`Conectando a ${this.device.name || 'WHOOP'}…`);

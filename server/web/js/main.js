@@ -63,6 +63,8 @@ async function poll() {
 }
 strap.addEventListener('uploaded', () => setTimeout(() => api('/status').then((s) => store.set({ status: s })).catch(() => {}), 1500));
 poll();
+// Intento de reconexión silenciosa al abrir (si el navegador lo permite).
+setTimeout(() => strap.autoConnect().catch(() => {}), 800);
 
 function Sidebar({ route }) {
   const groups = [...new Set(ROUTES.map((r) => r.group))];
