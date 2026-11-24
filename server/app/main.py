@@ -343,14 +343,18 @@ async def workout_to_strava(uid: str):
     return {"stravaId": aid}
 
 
-@app.post("/api/strong/import")
-async def strong_import(file: UploadFile = File(...)):
-    text = (await file.read()).decode("utf-8", errors="replace")
+async def import_strong_text(text: str) -> dict:
+    """Parses a Strong CSV export and merges it into workouts (idempotent: re-importing the full
+    export only adds new sessions). Overlapping strap/live/health records donate their HR data."""
+    text = text.lstrip("\ufeff")
+    if not text.strip():
+        raise HTTPException(400, "El archivo está vacío.")
     try:
         ws = await engine("strong", {"csv": text, "unit": settings()["strongUnit"]})
     except EngineError as ex:
-        raise HTTPException(400, str(ex))
+        raise HTTPException(400, f"No parece un CSV de Strong: {ex}")
     added = 0
+    new_names = []
     for sw in ws:
         start = int(sw["date"])
         end = start + max(int(sw.get("durationSeconds") or 0), 1800)
@@ -367,12 +371,42 @@ async def strong_import(file: UploadFile = File(...)):
                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
               (uid, "strong", start, end, "Fuerza", sw["name"], strain, avg, mx, kcal, sw.get("notes", ""), zones, json.dumps(sw), now()))
         added += 1
+        new_names.append(f"{sw['name']} ({local(start).strftime('%d/%m')})")
         if strain is None:
             try:
                 await recompute(uid)
             except Exception:
                 pass
-    return {"added": added, "total": len(ws)}
+    if added == 0:
+        msg = f"Strong: sin entrenos nuevos ({len(ws)} en el archivo)."
+    else:
+        shown = ", ".join(new_names[-3:]) + ("…" if added > 3 else "")
+        msg = f"Strong: {added} entreno{'s' if added != 1 else ''} nuevo{'s' if added != 1 else ''} de {len(ws)} · {shown}"
+    return {"added": added, "total": len(ws), "message": msg}
+
+
+@app.post("/api/strong/import")
+async def strong_import(file: UploadFile = File(...)):
+    """Upload from the web (multipart form, field «file»)."""
+    return await import_strong_text((await file.read()).decode("utf-8", errors="replace"))
+
+
+@app.post("/api/strong/import-raw")
+async def strong_import_raw(request: Request):
+    """Upload from the iOS Shortcut «Enviar a Pulso»: the CSV file as the raw request body
+    (any content type). Also accepts multipart with any file field, in case the Shortcut uses «Formulario»."""
+    ct = request.headers.get("content-type", "")
+    if ct.startswith("multipart/form-data"):
+        form = await request.form()
+        up = next((v for v in form.values() if hasattr(v, "read")), None)
+        if up is None:
+            raise HTTPException(400, "No llegó ningún archivo.")
+        raw = await up.read()
+    else:
+        raw = await request.body()
+    if len(raw) > 50 * 1024 * 1024:
+        raise HTTPException(413, "Archivo demasiado grande.")
+    return await import_strong_text(raw.decode("utf-8", errors="replace"))
 
 
 @app.get("/api/strong/stats")

@@ -117,11 +117,44 @@ function Strava({ st }) {
     <div class="tiny faint">Desde Entreno puedes subir cualquier sesión (por ejemplo de Strong) a Strava con la curva de FC de la pulsera.</div>`;
 }
 
+function CopyField({ value }) {
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(value); toast('Copiado'); }
+    catch { toast('Mantén pulsado el texto para copiarlo'); }
+  };
+  return html`<div class="row" style="gap:6px"><code style="flex:1;word-break:break-all;padding:8px 10px">${value}</code><button class="btn small" onClick=${copy}>Copiar</button></div>`;
+}
+
+function StrongShortcut() {
+  const url = `${location.origin}/api/strong/import-raw`;
+  return html`<details class="card" style="background:var(--panel-2);gap:8px">
+    <summary style="cursor:pointer"><b>Atajo «Enviar a Pulso»</b> <span class="small muted">· Strong → Pulso en dos toques</span></summary>
+    <div class="small"><b>Crear el Atajo (una vez, en el iPhone)</b></div>
+    <ol class="small" style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px">
+      <li>Abre <b>Atajos</b> › <b>+</b> y ponle de nombre <b>Enviar a Pulso</b>.</li>
+      <li>Toca el icono <b>ⓘ</b> (Detalles) › activa <b>Mostrar en hoja de compartir</b>. En los tipos de entrada deja solo <b>Archivos</b>.</li>
+      <li>En el primer bloque «Recibir <i>Archivos</i> de <i>Hoja de compartir</i>», elige <b>Si no hay entrada: Solicitar archivo</b>. Así también puedes lanzarlo a mano y elegir el CSV en Archivos.</li>
+      <li>Añade la acción <b>Obtener contenido de URL</b> con esta URL:<${CopyField} value=${url} />
+        Despliega las opciones: <b>Método: POST</b> · <b>Cuerpo de la solicitud: Archivo</b> · Archivo: <b>Entrada del atajo</b>.</li>
+      <li>Añade <b>Obtener valor del diccionario</b>: clave <code>message</code>, del «Contenido de la URL».</li>
+      <li>Añade <b>Mostrar notificación</b> con el «Valor del diccionario». Te dirá cuántos entrenos nuevos se han añadido.</li>
+    </ol>
+    <div class="small"><b>Usarlo después de entrenar</b></div>
+    <ol class="small" style="margin:0;padding-left:18px">
+      <li>Tailscale activo en el iPhone.</li>
+      <li>Strong › Perfil › Ajustes › <b>Exportar datos de Strong</b>.</li>
+      <li>En la hoja de compartir toca <b>Enviar a Pulso</b>. Listo: en unos segundos ves la notificación y la sesión aparece en Entreno con su esfuerzo y FC.</li>
+    </ol>
+    <div class="tiny faint">Puedes enviar siempre la exportación completa: Pulso solo añade lo nuevo. Si Strong guarda el archivo en vez de abrir la hoja de compartir, lanza el Atajo desde la app Atajos y elige el CSV.</div>
+  </details>`;
+}
+
 function Health({ s }) {
   const url = `${location.origin}/api/health/ingest`;
   return html`
     <div class="field"><label>Unidades de peso del CSV de Strong</label><select value=${s.strongUnit} onChange=${(e) => putSettings({ strongUnit: e.target.value })}><option value="kg">kg</option><option value="lb">lb</option></select></div>
-    <div class="small muted">Strong no tiene API: exporta el CSV (Perfil › Ajustes › Exportar datos) y súbelo en <a href="#/entreno">Entreno › Historial</a>. Solo se añaden las sesiones nuevas.</div>
+    <div class="small muted">Strong no tiene API: exporta el CSV (Perfil › Ajustes › Exportar datos) y súbelo en <a href="#/entreno">Entreno › Historial</a>, o mándalo en dos toques con el Atajo de abajo. Solo se añaden las sesiones nuevas.</div>
+    <${StrongShortcut} />
     <div class="small"><b>Apple Salud con un Atajo (pasos y peso automáticos)</b></div>
     <ol class="small" style="margin:0;padding-left:18px">
       <li>App Atajos › Automatización › nueva › <b>Hora del día</b> (p. ej. 23:30, diaria) › Ejecutar inmediatamente.</li>

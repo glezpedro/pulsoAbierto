@@ -68,6 +68,8 @@ El script hace todo esto:
 
 Comandos del bot: `/hoy`, `/sueno`, `/semana`, `/carga`, `/plan`, `/bateria` y `/coach`. También puedes escribirle cualquier pregunta directamente.
 
+**Strong**: CSV desde la web o con el Atajo de iOS «Enviar a Pulso» (Strong › Exportar › compartir › Enviar a Pulso), que sube el archivo a `POST /api/strong/import-raw`. Instrucciones en Ajustes.
+
 **Apple Salud**: con un Atajo de iOS que envía pasos y peso a `/api/health/ingest` (instrucciones en Ajustes).
 
 **Copias de seguridad**: todas las noches a las 04:00 se guarda una en `data/backups/` y se conservan 14.

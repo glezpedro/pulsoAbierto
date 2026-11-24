@@ -135,7 +135,7 @@ function HistoryTab({ onOpen }) {
           <option value="">Todas las fuentes</option><option value="strap">Detectados por la pulsera</option><option value="live">Grabados en directo</option>
           <option value="strong">Strong</option><option value="strava">Strava</option><option value="manual">Manual</option></select>
       </div>
-      <div class="tiny faint">Strong: Perfil › Ajustes › Exportar datos de Strong → guarda el CSV y súbelo aquí. Se cruza con la FC de la pulsera para calcular el esfuerzo de cada sesión.</div><//>
+      <div class="tiny faint">Strong: Perfil › Ajustes › Exportar datos de Strong → súbelo aquí, o en el iPhone usa el Atajo «Enviar a Pulso» (instrucciones en <a href="#/ajustes">Ajustes</a>). Se cruza con la FC de la pulsera para calcular el esfuerzo de cada sesión.</div><//>
     <${Card} span="12">${list.data ? html`<${WorkoutTable} list=${list.data} />` : html`<${Spinner} />`}<//>
   </div>`;
 }
