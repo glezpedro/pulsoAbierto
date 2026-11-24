@@ -71,7 +71,11 @@ Comandos del bot: `/hoy`, `/sueno`, `/semana`, `/carga`, `/plan`, `/bateria` y `
 
 **Strong**: CSV desde la web o con el Atajo de iOS «Enviar a Pulso» (Strong › Exportar › compartir › Enviar a Pulso), que sube el archivo a `POST /api/strong/import-raw`. Instrucciones en Ajustes.
 
-**Apple Salud**: con un Atajo de iOS que envía pasos y peso a `/api/health/ingest` (instrucciones en Ajustes).
+**App Salud**: el botón «Enviar a Salud» (en Resumen y Sueño) ejecuta el Atajo «Pulso a Salud», que escribe en Salud las fases del sueño, la frecuencia cardiaca, la FC en reposo, la respiración y la energía activa. Otro Atajo trae a Pulso los pasos y el peso. Instrucciones de los dos en Ajustes.
+
+**Interfaz**: estilo app Salud de iPhone, en claro u oscuro según el sistema. En el móvil, «Resumen» con tarjetas por categoría que abren el detalle; en el ordenador, todo el detalle en rejilla.
+
+**Sincronización**: barra con el porcentaje, los registros descargados y el tiempo restante, y botón Cancelar seguro: el bloque en curso no se confirma y se queda en la pulsera.
 
 **Copias de seguridad**: todas las noches a las 04:00 se guarda una en `data/backups/` y se conservan 14.
 

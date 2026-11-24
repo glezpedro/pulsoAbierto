@@ -1,5 +1,5 @@
 import { html, useState, useEffect, useRef } from '../../vendor/preact-htm.js';
-import { useStore, api, toast, store, n, hm, C, ZONE_COLORS, ZONES, useEventTarget } from '../core.js';
+import { useStore, api, toast, store, n, hm, C, ZONE_COLORS, ZONES, useEventTarget, alpha } from '../core.js';
 import { Card, Stat, ChartBox, Seg, ZoneBar, ZoneTable, Spinner } from '../ui.js';
 import { Page, SyncButton } from '../layout.js';
 import { strap } from '../ble/strap.js';
@@ -81,7 +81,7 @@ function WorkoutRecorder() {
     return () => strap.removeEventListener('strapevent', f);
   }, [rec]);
   const el = rec ? Math.floor((Date.now() - rec.start) / 1000) : 0;
-  const cfg = () => ({ type: 'line', data: { datasets: [{ data: pts.slice(-600).map((x) => ({ x: x.t, y: x.bpm })), borderColor: C.hr, pointRadius: 0, borderWidth: 2, tension: 0.3, fill: true, backgroundColor: 'rgba(255,84,104,.12)' }] },
+  const cfg = () => ({ type: 'line', data: { datasets: [{ data: pts.slice(-600).map((x) => ({ x: x.t, y: x.bpm })), borderColor: C.hr, pointRadius: 0, borderWidth: 2, tension: 0.3, fill: true, backgroundColor: alpha(C.hr, 0.12) }] },
     options: { animation: false, plugins: { legend: { display: false } }, scales: { x: { type: 'time', time: { unit: 'minute', displayFormats: { minute: 'HH:mm' } }, grid: { display: false } }, y: { grace: '10%' } } } });
   return html`<div class="grid">
     <${Card} span="5">

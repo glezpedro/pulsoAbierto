@@ -1,5 +1,5 @@
 import { html, useState } from '../../vendor/preact-htm.js';
-import { useApi, useStore, n, hm, mean, C, ZONE_COLORS, ZONES, addDays } from '../core.js';
+import { useApi, useStore, n, hm, mean, C, ZONE_COLORS, ZONES, addDays, alpha } from '../core.js';
 import { Card, Stat, Ring, ChartBox, ZoneTable, Empty, Seg, Tile } from '../ui.js';
 import { Page } from '../layout.js';
 import { DayNav } from './today.js';
@@ -45,24 +45,24 @@ function AcwrChart({ ls }) {
     const { ctx, chartArea: a, scales: { y } } = c;
     if (!y) return;
     ctx.save();
-    ctx.fillStyle = 'rgba(23,217,102,.08)';
+    ctx.fillStyle = alpha(C.green, 0.1);
     ctx.fillRect(a.left, y.getPixelForValue(1.3), a.right - a.left, y.getPixelForValue(0.8) - y.getPixelForValue(1.3));
-    ctx.fillStyle = 'rgba(255,69,69,.08)';
+    ctx.fillStyle = alpha(C.red, 0.08);
     ctx.fillRect(a.left, a.top, a.right - a.left, Math.max(0, y.getPixelForValue(1.5) - a.top));
     ctx.restore();
   } };
   const cfg = () => ({
     type: 'line', plugins: [band],
     data: { labels: ls.map((x) => x.day.slice(5)), datasets: [
-      { label: 'ACWR', data: ls.map((x) => x.acwr), borderColor: '#fff', borderWidth: 2, pointRadius: 0, tension: 0.3, yAxisID: 'y', spanGaps: true },
+      { label: 'ACWR', data: ls.map((x) => x.acwr), borderColor: C.fg, borderWidth: 2, pointRadius: 0, tension: 0.3, yAxisID: 'y', spanGaps: true },
       { label: 'Aguda', data: ls.map((x) => x.acute), borderColor: C.orange, borderWidth: 1.5, pointRadius: 0, tension: 0.3, yAxisID: 'y2' },
-      { label: 'Crónica', data: ls.map((x) => x.chronic), borderColor: C.strain, borderWidth: 1.5, pointRadius: 0, tension: 0.3, yAxisID: 'y2', fill: true, backgroundColor: 'rgba(61,139,255,.08)' },
+      { label: 'Crónica', data: ls.map((x) => x.chronic), borderColor: C.accent, borderWidth: 1.5, pointRadius: 0, tension: 0.3, yAxisID: 'y2', fill: true, backgroundColor: alpha(C.accent, 0.08) },
     ] },
     options: { interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' } },
       scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 12 } }, y: { min: 0, suggestedMax: 2, title: { display: true, text: 'ACWR' } }, y2: { position: 'right', grid: { display: false }, title: { display: true, text: 'carga' } } } },
   });
   return html`<${ChartBox} config=${cfg} height=${260} deps=${[ls.length, ls[ls.length - 1]?.day]} />
-    <div class="legend"><span><i style="background:rgba(23,217,102,.4)"></i>Zona óptima 0,8–1,3</span><span><i style="background:rgba(255,69,69,.4)"></i>Riesgo > 1,5</span></div>`;
+    <div class="legend"><span><i style=${{ background: alpha(C.green, 0.4) }}></i>Zona óptima 0,8–1,3</span><span><i style=${{ background: alpha(C.red, 0.4) }}></i>Riesgo > 1,5</span></div>`;
 }
 
 function StrainChart({ ls }) {

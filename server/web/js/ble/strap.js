@@ -1,5 +1,5 @@
 // Web Bluetooth driver for the WHOOP 4.0 (works in Bluefy on iPhone and Chrome on desktop/Android).
-import { UUID, TYPE, CMD, EVENTS, FrameAssembler, buildFrame, parse, decodeChunk, encodeSamples, payload, read, parseHeartRate, hex } from './protocol.js';
+import { UUID, TYPE, CMD, EVENTS, FrameAssembler, buildFrame, parse, decodeChunk, encodeSamples, payload, read, parseHeartRate, hex, u32 } from './protocol.js';
 import { queue, flush } from './queue.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -19,6 +19,7 @@ class Strap extends EventTarget {
       serial: null, firmware: null, clock: null, records: 0, chunks: 0, pending: 0, uploaded: 0, note: '',
       liveHR: null, liveRR: [], liveOn: false, lastSync: Number(localStorage.getItem('pulso.lastSync') || 0) || null,
       error: null, log: [], raw: false, rawCount: 0, syncStarted: null,
+      prog: null,   // { firstTs, lastTs, startedAt, pct, etaSec, rate } while downloading history
     };
     this.device = null; this.chars = {}; this.asm = {}; this.seq = 0; this.pending = new Map();
     this.historyFrames = []; this.historyActive = false; this.lastTraffic = 0; this.rawFrames = [];
@@ -226,16 +227,19 @@ class Strap extends EventTarget {
       case 'event': this.onEvent(m); break;
       case 'meta':
         this.lastTraffic = Date.now();
+        if (!this.historyActive && this.cancelledAt && Date.now() - this.cancelledAt < 10000) break;
         if (m.meta === 1) this.historyFrames = [];
         else if (m.meta === 2) { const frames = this.historyFrames; this.historyFrames = []; this.commit(frames, m.ack); }
         else if (m.meta === 3) this.finishHistory();
         break;
       case 'history':
+        if (!this.historyActive && this.cancelledAt && Date.now() - this.cancelledAt < 10000) break;  // tail after a cancel: not acked, stays on the strap
         this.lastTraffic = Date.now();
         if (!this.historyActive) { this.historyActive = true; this.set({ conn: 'syncing' }); }
         this.historyFrames.push(m.raw);
         this.s.records++;
-        if (this.s.records % 200 === 0) this.dispatchEvent(new Event('change'));
+        this.track(m.raw);
+        if (this.s.records % 100 === 0) this.dispatchEvent(new Event('change'));
         break;
       case 'realtime': this.liveTick(m.bpm, m.rr); break;
       case 'unknown': this.log(`Trama tipo ${m.type} (${m.len} B) sin decodificar`, 'warn'); break;
@@ -260,10 +264,42 @@ class Strap extends EventTarget {
   }
 
   // ------------------------------------------------------------ history
+  /** Progress from record timestamps: records are chronological, one per second, so the share of the
+   *  span [first record … now] already received is the share of the download done. */
+  track(raw) {
+    const ts = u32(raw, 11);
+    const nowS = Date.now() / 1000;
+    if (!ts || ts < 1.5e9 || ts > nowS + 86400) return;
+    const p = this.s.prog || { firstTs: ts, lastTs: ts, startedAt: Date.now() };
+    p.firstTs = Math.min(p.firstTs, ts);
+    p.lastTs = Math.max(p.lastTs, ts);
+    const span = Math.max(1, nowS - p.firstTs);
+    p.pct = Math.max(0, Math.min(99.5, ((p.lastTs - p.firstTs) / span) * 100));
+    const el = (Date.now() - p.startedAt) / 1000;
+    p.rate = el > 3 ? (p.lastTs - p.firstTs) / el : null;          // seconds of data per real second
+    p.etaSec = p.rate ? Math.max(0, (nowS - p.lastTs) / p.rate) : null;
+    this.s.prog = p;
+  }
+
+  /** Stops the download safely: the strap is told to abort, the chunk in progress is NOT acknowledged
+   *  (so it stays on the strap for next time) and everything already acknowledged is kept and uploaded. */
+  async cancelSync() {
+    if (!this.historyActive) return;
+    this.cancelledAt = Date.now();
+    this.historyActive = false;
+    this.historyFrames = [];
+    this.releaseWake();
+    this.log('Sincronización cancelada por el usuario: el bloque en curso se queda en la pulsera.', 'warn');
+    this.set({ conn: this.device?.gatt?.connected ? 'ready' : 'disconnected', prog: null });
+    try { await this.send(CMD.abortHistory, [0], 2500); } catch { /* ignore */ }
+    this.upload();
+  }
+
   async syncHistory() {
     if (!this.connected || this.historyActive) return;
     this.historyActive = true;
-    this.set({ conn: 'syncing', records: 0, chunks: 0, syncStarted: Date.now(), error: null });
+    this.cancelledAt = null;
+    this.set({ conn: 'syncing', records: 0, chunks: 0, syncStarted: Date.now(), error: null, prog: null });
     this.lastTraffic = Date.now();
     this.acquireWake();
     this.log('Iniciando descarga de historial…');
@@ -303,7 +339,7 @@ class Strap extends EventTarget {
     this.historyActive = false;
     const now = Date.now();
     localStorage.setItem('pulso.lastSync', String(now));
-    this.set({ conn: this.device?.gatt?.connected ? 'ready' : 'disconnected', lastSync: now });
+    this.set({ conn: this.device?.gatt?.connected ? 'ready' : 'disconnected', lastSync: now, prog: null });
     this.log(`Descarga completa: ${this.s.records} registros en ${Math.round((now - (this.s.syncStarted || now)) / 1000)} s`);
     this.releaseWake();
     this.upload();

@@ -1,5 +1,5 @@
 import { html, useState } from '../../vendor/preact-htm.js';
-import { useApi, useStore, store, n, mean, sd, C, recColor, recBand, addDays } from '../core.js';
+import { useApi, useStore, store, n, mean, sd, C, recColor, recBand, addDays, alpha } from '../core.js';
 import { Card, Stat, Ring, ChartBox, Heatmap, Empty, Seg } from '../ui.js';
 import { Page } from '../layout.js';
 import { DayNav } from './today.js';
@@ -44,7 +44,7 @@ function Contrib({ label, z, v }) {
     <div class="row between small"><span>${label}</span><span class="muted num">${v} · ${z == null ? '–' : `${z > 0 ? '+' : ''}${n(z, 1)} σ`}</span></div>
     <div style="position:relative;height:8px;background:var(--panel-2);border-radius:99px">
       <div style=${{ position: 'absolute', top: 0, bottom: 0, left: x >= 0 ? '50%' : `${50 + x * 50}%`, width: `${Math.abs(x) * 50}%`, background: x >= 0 ? C.green : C.red, borderRadius: '99px' }}></div>
-      <div style="position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:#5b6670"></div>
+      <div style="position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--muted)"></div>
     </div></div>`;
 }
 
@@ -53,7 +53,7 @@ function RecChart({ days }) {
     type: 'bar',
     data: { labels: days.map((d) => d.dayKey.slice(5)), datasets: [
       { label: 'Recuperación', data: days.map((d) => d.recovery), backgroundColor: days.map((d) => recColor(d.recovery)), borderRadius: 4, yAxisID: 'y' },
-      { type: 'line', label: 'VFC', data: days.map((d) => d.hrv), borderColor: '#fff', borderWidth: 1.5, pointRadius: 0, tension: 0.3, yAxisID: 'y2' },
+      { type: 'line', label: 'VFC', data: days.map((d) => d.hrv), borderColor: C.fg, borderWidth: 1.5, pointRadius: 0, tension: 0.3, yAxisID: 'y2' },
     ] },
     options: { plugins: { legend: { position: 'bottom' } }, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 12 } }, y: { min: 0, max: 100 }, y2: { position: 'right', grid: { display: false } } } },
   });

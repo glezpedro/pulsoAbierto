@@ -1,5 +1,5 @@
 import { html, useState, useEffect } from '../../vendor/preact-htm.js';
-import { useApi, useStore, api, toast, store, n, hm, hhmm, C, ZONE_COLORS, todayKey } from '../core.js';
+import { useApi, useStore, api, toast, store, n, hm, hhmm, C, ZONE_COLORS, todayKey, alpha } from '../core.js';
 import { Card, Stat, ChartBox, Seg, Empty, Spinner, Modal, ZoneTable, ZoneBar, timeX, Md } from '../ui.js';
 import { Page } from '../layout.js';
 import { WorkoutTable } from './load.js';
@@ -161,7 +161,7 @@ function WorkoutModal({ uid, onClose }) {
       </div>
       <div class="small muted">${new Date(d.start * 1000).toLocaleString('es-ES')} → ${hhmm(d.end)}</div>
       ${d.series?.some((p) => p.hr) && html`<${ChartBox} height=${180} deps=${[d.uid]} config=${() => ({
-        type: 'line', data: { datasets: [{ data: d.series.map((p) => ({ x: p.t * 1000, y: p.hr })), borderColor: C.hr, pointRadius: 0, borderWidth: 1.6, fill: true, backgroundColor: 'rgba(255,84,104,.12)', tension: 0.3 }] },
+        type: 'line', data: { datasets: [{ data: d.series.map((p) => ({ x: p.t * 1000, y: p.hr })), borderColor: C.hr, pointRadius: 0, borderWidth: 1.6, fill: true, backgroundColor: alpha(C.hr, 0.12), tension: 0.3 }] },
         options: { plugins: { legend: { display: false } }, scales: { x: timeX('minute'), y: { grace: '5%' } } } })} />`}
       ${d.zones?.length > 0 && html`<${ZoneTable} zones=${d.zones} />`}
       ${d.strong && html`<div class="col" style="gap:8px"><b>Series (Strong)</b>${Object.entries(groupSets(d.strong.sets)).map(([ex, sets]) => html`<div>
@@ -197,7 +197,7 @@ function ProgressTab() {
         type: 'line', data: { datasets: [
           { label: '1RM est.', data: pts.map((p) => ({ x: p.date * 1000, y: p.e1RM })), borderColor: C.accent, pointRadius: 3, tension: 0.25, yAxisID: 'y' },
           { label: 'Peso máx', data: pts.map((p) => ({ x: p.date * 1000, y: p.topWeight })), borderColor: C.strain, pointRadius: 2, tension: 0.25, yAxisID: 'y' },
-          { type: 'bar', label: 'Volumen (kg)', data: cur.points.map((p) => ({ x: p.date * 1000, y: p.volume })), backgroundColor: 'rgba(255,255,255,.08)', yAxisID: 'y2' },
+          { type: 'bar', label: 'Volumen (kg)', data: cur.points.map((p) => ({ x: p.date * 1000, y: p.volume })), backgroundColor: alpha(C.muted, 0.25), yAxisID: 'y2' },
         ] },
         options: { plugins: { legend: { position: 'bottom' } }, scales: { x: timeX('week'), y: { grace: '10%' }, y2: { position: 'right', grid: { display: false } } } } })} />
       <div class="row" style="gap:18px"><span class="small">Mejor <b>${n(cur.best, 1)} kg</b></span>

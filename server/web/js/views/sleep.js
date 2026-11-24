@@ -1,9 +1,10 @@
 import { html, useState } from '../../vendor/preact-htm.js';
-import { useApi, useStore, store, api, toast, n, hm, hmShort, hhmm, dayTitle, addDays, todayKey, isToday, mean, sd, C, needOf, STAGES } from '../core.js';
+import { useApi, useStore, store, api, toast, n, hm, hmShort, hhmm, dayTitle, addDays, todayKey, isToday, mean, sd, C, needOf, STAGES, alpha } from '../core.js';
 import { Card, Stat, Ring, ChartBox, timeX, Hypnogram, Empty, Spinner, Bar } from '../ui.js';
 import { Page } from '../layout.js';
 import { DayNav } from './today.js';
 import { Icon } from '../icons.js';
+import { SendToHealth } from './health.js';
 
 export function SleepView() {
   const { date, status } = useStore();
@@ -12,7 +13,7 @@ export function SleepView() {
   const rep = day.data?.report;
   const s = rep?.sleep;
   const m = day.data?.metrics || {};
-  return html`<${Page} title="Sueño" right=${html`<${DayNav} />`}>
+  return html`<${Page} title="Sueño" right=${html`<div class="row"><${DayNav} /><${SendToHealth} date=${date} small /></div>`}>
     ${day.loading && !day.data && html`<div class="row"><${Spinner} /> Cargando…</div>`}
     <div class="grid">
       ${day.data && !s && html`<${Card} span="12"><${Empty} icon="☾" title="No hay sueño principal para este día">Duerme con la pulsera puesta y sincroniza por la mañana desde Bluefy.<//><//>`}
@@ -65,7 +66,7 @@ function Physio({ s, showSpO2 }) {
     type: 'line',
     data: { datasets: [
       { label: 'FC', data: hr, borderColor: C.hr, borderWidth: 1.4, pointRadius: 0, tension: 0.3, yAxisID: 'y', spanGaps: true },
-      { type: 'bar', label: 'VFC (5 min)', data: hrv, backgroundColor: 'rgba(23,217,102,.45)', yAxisID: 'y2', barPercentage: 1, categoryPercentage: 1 },
+      { type: 'bar', label: 'VFC (5 min)', data: hrv, backgroundColor: alpha(C.green, 0.5), yAxisID: 'y2', barPercentage: 1, categoryPercentage: 1 },
     ] },
     options: { interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' } }, scales: { x: timeX(), y: { grace: '8%', title: { display: true, text: 'lpm' } }, y2: { position: 'right', beginAtZero: true, grid: { display: false }, title: { display: true, text: 'ms' } } } },
   });
@@ -120,7 +121,7 @@ function History({ days }) {
       { label: 'REM', data: days.map((x) => (x.remMin ?? null) && x.remMin / 60), backgroundColor: C.rem, stack: 's' },
       { label: 'Ligero', data: days.map((x) => (x.lightMin ?? null) && x.lightMin / 60), backgroundColor: C.light, stack: 's' },
       { label: 'Despierto', data: days.map((x) => (x.awakeMin ?? null) && x.awakeMin / 60), backgroundColor: C.awake, stack: 's' },
-      { type: 'line', label: 'Necesidad', data: days.map((x) => (x.sleepNeedMin ? x.sleepNeedMin / 60 : null)), borderColor: '#fff', borderDash: [4, 4], pointRadius: 2, borderWidth: 1.2 },
+      { type: 'line', label: 'Necesidad', data: days.map((x) => (x.sleepNeedMin ? x.sleepNeedMin / 60 : null)), borderColor: C.fg, borderDash: [4, 4], pointRadius: 2, borderWidth: 1.2 },
     ] },
     options: { plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${hm((c.raw || 0) * 60)}` } } }, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, title: { display: true, text: 'horas' } } } },
   });

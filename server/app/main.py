@@ -748,13 +748,68 @@ async def health_ingest(p: dict = Body(...)):
     return {"ok": True, "day": key}
 
 
+def _hk_date(ts: int) -> str:
+    """Local time as text that Shortcuts converts to a date reliably."""
+    return local(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
 @app.get("/api/health/export")
-async def health_export():
-    """Small JSON for a Shortcut that writes Pulso data into Apple Health."""
-    r = db.one("SELECT metrics FROM days WHERE day_key=?", (today_key(),))
+async def health_export(day: str | None = None):
+    """Data for the iOS Shortcut «Pulso a Salud», which writes it into Apple Health.
+
+    Sleep stages come as four separate lists so each Shortcut loop can use a fixed stage value."""
+    key = (day or "").strip()[:10] or today_key()
+    r = db.one("SELECT metrics, report FROM days WHERE day_key=?", (key,))
     m = jload(r["metrics"], {}) if r else {}
-    return {"restingHR": m.get("rhr"), "hrv": m.get("hrv"), "respiratoryRate": m.get("resp"), "sleepMinutes": m.get("sleptMin"),
-            "bedtime": m.get("bedtime"), "wakeTime": m.get("wakeTime"), "activeKcal": m.get("activeKcal")}
+    rep = jload(r["report"]) if r and r["report"] else None
+    out = {"day": key, "hasData": bool(rep), "alreadyExported": key in (db.kv_get("health_exported", {}) or {}),
+           "restingHR": m.get("rhr"), "respiratoryRate": round(m["resp"], 1) if m.get("resp") else None,
+           "activeKcal": round(m["activeKcal"]) if m.get("activeKcal") else None,
+           "spo2": round(m["spo2"], 1) if m.get("spo2") and settings().get("showSpO2") else None,
+           "sleepDeep": [], "sleepCore": [], "sleepREM": [], "sleepAwake": [], "inBed": [], "heartRate": []}
+    if not rep:
+        return out
+    s0, _ = day_bounds(key)
+    out["date"] = _hk_date(min(now(), s0 + 12 * 3600))
+    sl = rep.get("sleep")
+    if sl:
+        out["wake"] = _hk_date(sl["end"])
+        out["bedtime"] = _hk_date(sl["start"])
+        out["inBed"] = [{"start": _hk_date(sl["start"]), "end": _hk_date(sl["end"])}]
+        names = {0: "sleepAwake", 1: "sleepCore", 2: "sleepDeep", 3: "sleepREM"}
+        st, i = sl["stages"], 0
+        while i < len(st):
+            j = i
+            while j + 1 < len(st) and st[j + 1] == st[i]:
+                j += 1
+            out[names[st[i]]].append({"start": _hk_date(sl["start"] + i * 60), "end": _hk_date(sl["start"] + (j + 1) * 60)})
+            i = j + 1
+    else:
+        out["wake"] = out["date"]
+    # heart rate every 10 minutes (Shortcuts writes one sample per loop; 10 min keeps it fast)
+    buckets = rep.get("hrTimeline") or []
+    for k in range(0, len(buckets), 2):
+        grp = buckets[k:k + 2]
+        out["heartRate"].append({"value": round(sum(b["avg"] for b in grp) / len(grp)), "date": _hk_date(grp[0]["ts"])})
+    out["counts"] = {k: len(out[k]) for k in ("sleepDeep", "sleepCore", "sleepREM", "sleepAwake", "heartRate")}
+    return out
+
+
+@app.post("/api/health/exported")
+async def health_exported(p: dict = Body(default={})):
+    key = (str(p.get("day") or "").strip()[:10]) or today_key()
+    d = db.kv_get("health_exported", {}) or {}
+    d[key] = now()
+    db.kv_set("health_exported", d)
+    return {"ok": True, "day": key, "message": f"Datos de {key} enviados a Salud ✅"}
+
+
+@app.get("/api/health/exported")
+async def health_exported_status(day: str | None = None):
+    d = db.kv_get("health_exported", {}) or {}
+    key = (day or "")[:10] or today_key()
+    return {"day": key, "exportedAt": d.get(key)}
+
 
 # ===================================================================== export / demo / wipe
 

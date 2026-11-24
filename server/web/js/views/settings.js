@@ -3,6 +3,7 @@ import { useApi, useStore, api, toast, store, n } from '../core.js';
 import { Card, Stat, Spinner } from '../ui.js';
 import { Page } from '../layout.js';
 import { Icon } from '../icons.js';
+import { HealthShortcutGuide } from './health.js';
 
 export function SettingsView() {
   const { status } = useStore();
@@ -18,7 +19,7 @@ export function SettingsView() {
       <${Card} span="6" title="Telegram" icon=${html`<${Icon} n="send" />`}><${Telegram} status=${status} /><//>
       <${Card} span="6" title="Notificaciones" icon=${html`<${Icon} n="send" />`}><${Notifs} s=${status.settings} /><//>
       <${Card} span="6" title="Strava" icon=${html`<${Icon} n="trend" />`}><${Strava} st=${status.strava} /><//>
-      <${Card} span="6" title="Strong y Apple Salud" icon=${html`<${Icon} n="dumbbell" />`}><${Health} s=${status.settings} /><//>
+      <${Card} span="6" title="Strong y app Salud" icon=${html`<${Icon} n="heart" />`}><${Health} s=${status.settings} /><//>
       <${Card} span="12" title="Datos" icon=${html`<${Icon} n="report" />`}><${Data} status=${status} /><//>
       <${Card} span="12" title="Coach IA (opcional, de pago)" icon=${html`<${Icon} n="spark" />`}>
         <details><summary class="small muted" style="cursor:pointer">Pulso funciona completo sin IA. Si algún día quieres el chat con Claude, el análisis redactado o planes generados por IA, configúralo aquí.</summary>
@@ -157,7 +158,8 @@ function Health({ s }) {
     <div class="field"><label>Unidades de peso del CSV de Strong</label><select value=${s.strongUnit} onChange=${(e) => putSettings({ strongUnit: e.target.value })}><option value="kg">kg</option><option value="lb">lb</option></select></div>
     <div class="small muted">Strong no tiene API: exporta el CSV (Perfil › Ajustes › Exportar datos) y súbelo en <a href="#/entreno">Entreno › Historial</a>, o mándalo en dos toques con el Atajo de abajo. Solo se añaden las sesiones nuevas.</div>
     <${StrongShortcut} />
-    <div class="small"><b>Apple Salud con un Atajo (pasos y peso automáticos)</b></div>
+    <${HealthShortcutGuide} />
+    <div class="small"><b>De Salud a Pulso con un Atajo (pasos y peso automáticos)</b></div>
     <ol class="small" style="margin:0;padding-left:18px">
       <li>App Atajos › Automatización › nueva › <b>Hora del día</b> (p. ej. 23:30, diaria) › Ejecutar inmediatamente.</li>
       <li>Acción <b>Buscar muestras de salud</b>: Pasos, fecha de inicio <i>hoy</i> → acción <b>Calcular estadísticas</b> › Suma.</li>

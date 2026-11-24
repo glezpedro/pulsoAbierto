@@ -1,7 +1,8 @@
 import { html, useState } from '../../vendor/preact-htm.js';
-import { useApi, useStore, store, api, toast, n, hm, hmShort, hhmm, dayTitle, addDays, todayKey, isToday, mean, sd, C, recColor, recBand, needOf, ZONE_COLORS } from '../core.js';
-import { Card, Tile, Stat, Ring, ChartBox, timeX, ZoneBar, Md, Empty, Spinner } from '../ui.js';
-import { Page, SyncButton } from '../layout.js';
+import { useApi, useStore, store, api, toast, n, hm, hmShort, hhmm, dayTitle, addDays, todayKey, isToday, mean, sd, C, recColor, recBand, needOf, ZONE_COLORS, alpha, useIsMobile, keyDate } from '../core.js';
+import { Card, Tile, Stat, Ring, ChartBox, timeX, ZoneBar, Md, Empty, Spinner, HKCard } from '../ui.js';
+import { Page, SyncButton, SyncProgress } from '../layout.js';
+import { SendToHealth } from './health.js';
 import { Icon } from '../icons.js';
 
 export function DayNav() {
@@ -25,14 +26,20 @@ export function baselineDelta(base, key, v, higherIsBetter, digits = 0) {
 }
 
 export function TodayView() {
+  const mobile = useIsMobile();
+  const [detail, setDetail] = useState(false);
+  if (mobile && !detail) return html`<${HealthSummary} onDetail=${() => { setDetail(true); window.scrollTo(0, 0); }} />`;
+  return html`<${TodayDetail} onBack=${mobile ? () => setDetail(false) : null} />`;
+}
+
+function TodayDetail({ onBack }) {
   const { date, status } = useStore();
   const { data, loading, error } = useApi(`/day/${date}`, [date]);
   const plan = useApi(isToday(date) ? '/plan/today' : null, [date]);
   const m = data?.metrics || {};
   const rep = data?.report;
   const hasData = rep && (m.strain != null || m.recovery != null);
-  return html`<${Page} title=${dayTitle(date)} right=${html`<${DayNav} />`}>
-    <div class="only-mobile"><${SyncButton} big /></div>
+  return html`<${Page} title=${dayTitle(date)} right=${html`<div class="row">${onBack && html`<button class="btn small" onClick=${onBack}>‹ Resumen</button>`}<${DayNav} /><${SendToHealth} date=${date} small /></div>`}>
     ${loading && !data && html`<div class="row"><${Spinner} /> Cargando…</div>`}
     ${error && html`<div class="card bad">${error}</div>`}
     ${data && !hasData && html`<div class="grid"><${Card} span="12"><${Empty} icon="⌚" title=${`Sin datos para ${dayTitle(date).toLowerCase()}`}>
@@ -74,8 +81,8 @@ function StrainTarget({ cur, lo, hi }) {
   return html`<${Card} title="Esfuerzo objetivo" icon=${html`<${Icon} n="bolt" />`} right=${html`<span class="pill blue">${n(lo)}–${n(hi)}</span>`}>
     <div style="position:relative;height:16px">
       <div class="bar" style="position:absolute;inset:4px 0"></div>
-      <div style=${{ position: 'absolute', top: '4px', height: '8px', left: pct(lo), width: pct(hi - lo), background: 'rgba(61,139,255,.5)', borderRadius: '99px' }}></div>
-      <div style=${{ position: 'absolute', top: 0, left: `calc(${pct(Math.min(21, cur))} - 8px)`, width: '16px', height: '16px', borderRadius: '50%', background: '#fff' }}></div>
+      <div style=${{ position: 'absolute', top: '4px', height: '8px', left: pct(lo), width: pct(hi - lo), background: alpha(C.strain, 0.5), borderRadius: '99px' }}></div>
+      <div style=${{ position: 'absolute', top: 0, left: `calc(${pct(Math.min(21, cur))} - 8px)`, width: '16px', height: '16px', borderRadius: '50%', background: C.strain, boxShadow: '0 0 0 3px var(--panel)' }}></div>
     </div>
     <div class="small muted">${cur < lo ? `Te quedan ${n(lo - cur, 1)} puntos para entrar en tu rango óptimo de hoy.` : cur > hi ? 'Has superado el objetivo: a partir de aquí, recuperar.' : 'Estás en tu rango óptimo de hoy.'}</div>
   <//>`;
@@ -178,14 +185,14 @@ function DayChart({ date, rep }) {
   const bands = { id: 'bands', beforeDatasetsDraw(c) {
     const { ctx, chartArea: a, scales: { x } } = c;
     ctx.save();
-    for (const sl of sleep) { ctx.fillStyle = 'rgba(140,123,255,.10)'; ctx.fillRect(x.getPixelForValue(sl.start * 1000), a.top, x.getPixelForValue(sl.end * 1000) - x.getPixelForValue(sl.start * 1000), a.bottom - a.top); }
-    for (const ac of acts) { ctx.fillStyle = 'rgba(61,139,255,.16)'; ctx.fillRect(x.getPixelForValue(ac.start * 1000), a.top, x.getPixelForValue(ac.end * 1000) - x.getPixelForValue(ac.start * 1000), a.bottom - a.top); }
+    for (const sl of sleep) { ctx.fillStyle = alpha(C.sleep, 0.12); ctx.fillRect(x.getPixelForValue(sl.start * 1000), a.top, x.getPixelForValue(sl.end * 1000) - x.getPixelForValue(sl.start * 1000), a.bottom - a.top); }
+    for (const ac of acts) { ctx.fillStyle = alpha(C.strain, 0.16); ctx.fillRect(x.getPixelForValue(ac.start * 1000), a.top, x.getPixelForValue(ac.end * 1000) - x.getPixelForValue(ac.start * 1000), a.bottom - a.top); }
     ctx.restore();
   } };
   const hrCfg = () => ({
     type: 'line', plugins: [bands],
     data: { datasets: [
-      { label: 'Máx', data: rep.hrTimeline.map((b) => ({ x: b.ts * 1000, y: b.max })), borderWidth: 0, pointRadius: 0, fill: '+1', backgroundColor: 'rgba(255,84,104,.15)' },
+      { label: 'Máx', data: rep.hrTimeline.map((b) => ({ x: b.ts * 1000, y: b.max })), borderWidth: 0, pointRadius: 0, fill: '+1', backgroundColor: alpha(C.hr, 0.15) },
       { label: 'Mín', data: rep.hrTimeline.map((b) => ({ x: b.ts * 1000, y: b.min })), borderWidth: 0, pointRadius: 0, fill: false },
       { label: 'FC media', data: rep.hrTimeline.map((b) => ({ x: b.ts * 1000, y: b.avg })), borderColor: C.hr, borderWidth: 1.6, pointRadius: 0, tension: 0.3 },
     ] },
@@ -197,7 +204,7 @@ function DayChart({ date, rep }) {
       type: 'line', plugins: [bands],
       data: { datasets: [
         { label: 'FC (lpm)', data: pts.map((p) => ({ x: p.t * 1000, y: p.hr })), borderColor: C.hr, borderWidth: 1.4, pointRadius: 0, yAxisID: 'y', tension: 0.25 },
-        { label: 'Movimiento (°/min)', data: pts.map((p) => ({ x: p.t * 1000, y: p.motion })), borderColor: C.strain, backgroundColor: 'rgba(61,139,255,.25)', fill: true, borderWidth: 1, pointRadius: 0, yAxisID: 'y2' },
+        { label: 'Movimiento (°/min)', data: pts.map((p) => ({ x: p.t * 1000, y: p.motion })), borderColor: C.accent, backgroundColor: alpha(C.accent, 0.2), fill: true, borderWidth: 1, pointRadius: 0, yAxisID: 'y2' },
         { label: 'Temp. piel (raw)', data: pts.map((p) => ({ x: p.t * 1000, y: p.temp })), borderColor: C.orange, borderWidth: 1.2, pointRadius: 0, yAxisID: 'y3', hidden: false },
         { label: 'VFC (ms)', data: pts.map((p) => ({ x: p.t * 1000, y: p.rmssd })), borderColor: C.green, borderWidth: 1.2, pointRadius: 0, yAxisID: 'y4', spanGaps: false },
       ] },
@@ -207,7 +214,7 @@ function DayChart({ date, rep }) {
     };
   };
   return html`<div class="row between"><${Seg2} value=${mode} onChange=${setMode} />
-    <div class="legend"><span><i style="background:rgba(140,123,255,.4)"></i>Sueño</span><span><i style="background:rgba(61,139,255,.45)"></i>Actividad</span></div></div>
+    <div class="legend"><span><i style=${{ background: alpha(C.sleep, 0.45) }}></i>Sueño</span><span><i style=${{ background: alpha(C.strain, 0.5) }}></i>Actividad</span></div></div>
     ${mode === 'hr'
       ? html`<${ChartBox} config=${hrCfg} height=${240} deps=${[rep.generatedAt, mode]} />
         <div class="row" style="gap:18px"><span class="small muted">Media <b class="num">${n(rep.metrics.avgHR)}</b> lpm</span><span class="small muted">Máx <b class="num">${n(rep.metrics.maxHR)}</b> lpm</span><span class="small muted">Mín sueño <b class="num">${n(rep.sleep?.minHR)}</b> lpm</span></div>`
@@ -223,12 +230,12 @@ function StressChart({ rep, m }) {
   if (!rep.stress?.length) return html`<div class="small muted">Sin datos de estrés.</div>`;
   const cfg = () => ({
     type: 'bar',
-    data: { datasets: [{ data: rep.stress.map((p) => ({ x: p.ts * 1000, y: p.level })), backgroundColor: rep.stress.map((p) => (p.active ? 'rgba(61,139,255,.55)' : p.level >= 2 ? C.red : p.level >= 1 ? C.yellow : C.green)), barPercentage: 1, categoryPercentage: 1 }] },
+    data: { datasets: [{ data: rep.stress.map((p) => ({ x: p.ts * 1000, y: p.level })), backgroundColor: rep.stress.map((p) => (p.active ? alpha(C.strain, 0.55) : p.level >= 2 ? C.red : p.level >= 1 ? C.yellow : C.green)), barPercentage: 1, categoryPercentage: 1 }] },
     options: { plugins: { legend: { display: false } }, scales: { x: timeX(), y: { min: 0, max: 3, ticks: { stepSize: 1 } } } },
   });
   return html`<${ChartBox} config=${cfg} height=${150} deps=${[rep.generatedAt]} />
     <div class="row between"><span class="small">Media <b>${n(m.avgStress, 1)}</b>/3 · alto ${hm(m.highStressMin || 0)}</span>
-    <div class="legend"><span><i style="background:${C.green}"></i>Bajo</span><span><i style="background:${C.yellow}"></i>Medio</span><span><i style="background:${C.red}"></i>Alto</span><span><i style="background:rgba(61,139,255,.6)"></i>Actividad</span></div></div>`;
+    <div class="legend"><span><i style="background:${C.green}"></i>Bajo</span><span><i style="background:${C.yellow}"></i>Medio</span><span><i style="background:${C.red}"></i>Alto</span><span><i style=${{ background: alpha(C.strain, 0.6) }}></i>Actividad</span></div></div>`;
 }
 
 function Activities({ rep, workouts, events }) {
@@ -245,3 +252,75 @@ function Activities({ rep, workouts, events }) {
     ${events?.length > 0 && html`<div class="col" style="gap:2px"><div class="tiny muted">EVENTOS DE LA PULSERA</div>
       ${events.slice(-8).map((e) => html`<div class="row between small"><span>${e.label}</span><span class="muted num">${hhmm(e.ts)}</span></div>`)}</div>`}`;
 }
+
+// ------------------------------------------------------------ móvil: «Resumen» al estilo de la app Salud
+function HealthSummary({ onDetail }) {
+  const { date, status } = useStore();
+  const day = useApi(`/day/${date}`, [date]);
+  const week = useApi(`/days?to=${date}&days=7`, [date]);
+  const plan = useApi(isToday(date) ? '/plan/today' : null, [date]);
+  const m = day.data?.metrics || {};
+  const rep = day.data?.report;
+  const w = week.data || [];
+  const sp = (k, f) => w.map((x) => (f ? f(x) : x[k]) ?? null);
+  const bat = status?.battery;
+  const has = rep && (m.strain != null || m.recovery != null);
+  const sub = keyDate(date).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+  const temp = (() => {
+    const vals = (day.data?.baseline || []).map((x) => x.skinTemp).filter((x) => x != null);
+    if (m.skinTemp == null || vals.length < 3 || !sd(vals)) return null;
+    return (m.skinTemp - mean(vals)) / sd(vals);
+  })();
+  return html`<div class="page">
+    <div class="topbar"><div><div class="date-sub">${sub}</div><h1>${isToday(date) ? 'Resumen' : dayTitle(date)}</h1></div>
+      <div class="row" style="gap:6px;margin-top:18px">
+        <button class="btn small" aria-label="Día anterior" onClick=${() => store.set({ date: addDays(date, -1) })}><${Icon} n="chevl" /></button>
+        <button class="btn small" aria-label="Día siguiente" disabled=${isToday(date)} onClick=${() => store.set({ date: addDays(date, 1) })}><${Icon} n="chev" /></button></div></div>
+    <${SyncProgress} />
+    <${SyncButton} big />
+    ${day.loading && !day.data && html`<div class="row"><${Spinner} /> Cargando…</div>`}
+    ${day.data && !has && html`<div class="hk-card"><${Empty} icon="⌚" title="Sin datos para este día">Conecta la pulsera con el botón de arriba para descargar tus datos.<//></div>`}
+    ${has && html`
+      <div class="section-title">Destacados</div>
+      <div class="hk-card" onClick=${onDetail} style="cursor:pointer">
+        <${Rings} m=${m} rep=${rep} />
+      </div>
+      <div class="hk-card"><div class="hk-head"><span class="hk-cat" style="--cat:var(--accent)">Resumen del día</span></div>
+        <div class="md">${day.data.ai ? html`<${Md} text=${day.data.ai} />` : localSummary(day.data)}</div></div>
+
+      <div class="section-title">Favoritos</div>
+      <div class="hk-list">
+        <${HKCard} cat="var(--green)" icon="heart" title="Recuperación" when=${rep.sleep ? hhmm(rep.sleep.end) : 'Hoy'} href="#/recuperacion"
+          value=${m.recovery != null ? n(m.recovery) : '–'} unit="%" label=${m.recovery == null ? 'Sin sueño analizado' : m.recovery >= 67 ? 'Lista para rendir' : m.recovery >= 34 ? 'Mantén la carga' : 'Prioriza recuperar'} spark=${sp('recovery')} />
+        <${HKCard} cat="var(--sleep)" icon="sleep" title="Sueño" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/sueno"
+          value=${m.sleptMin != null ? hmShortTxt(m.sleptMin) : '–'} label=${m.sleepNeedMin ? `Dormido · necesidad ${hm(m.sleepNeedMin)} · puntuación ${n(m.sleepScore)}` : ''} spark=${sp(null, (x) => x.sleptMin)} />
+        <${HKCard} cat="var(--activity)" icon="bolt" title="Esfuerzo" when="Hoy" href="#/carga"
+          value=${n(m.strain, 1)} label=${rep.targetLo != null && isToday(date) ? `Objetivo ${n(rep.targetLo)}–${n(rep.targetHi)}` : 'de 21'} spark=${sp('strain')} />
+        <${HKCard} cat="var(--heart)" icon="heart" title="Frecuencia cardiaca en reposo" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/recuperacion"
+          value=${n(m.rhr)} unit="lpm" spark=${sp('rhr')} />
+        <${HKCard} cat="var(--heart)" icon="wave" title="Variabilidad de la frecuencia cardiaca" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/recuperacion"
+          value=${n(m.hrv)} unit="ms" label="RMSSD durante el sueño" spark=${sp('hrv')} />
+        <${HKCard} cat="var(--heart)" icon="heart" title="Frecuencia cardiaca" when="Hoy" onClick=${onDetail}
+          value=${`${n(m.avgHR)}`} unit="lpm de media" label=${`Máx ${n(m.maxHR)} lpm · mín sueño ${n(rep.sleep?.minHR)} lpm`} spark=${rep.hrTimeline.slice(-24).map((b) => b.avg)} />
+        <${HKCard} cat="var(--resp)" icon="lungs" title="Frecuencia respiratoria" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/sueno"
+          value=${n(m.resp, 1)} unit="rpm" label="Durante el sueño" spark=${sp('resp')} />
+        <${HKCard} cat="var(--activity)" icon="flame" title="Energía activa" when="Hoy" href="#/carga"
+          value=${n(m.activeKcal)} unit="kcal" label=${`${n(m.kcal)} kcal en total`} spark=${sp('activeKcal')} />
+        ${m.steps != null && html`<${HKCard} cat="var(--activity)" icon="walk" title="Pasos" when="Hoy" value=${n(m.steps)} unit="pasos" spark=${sp('steps')} />`}
+        <${HKCard} cat="var(--mind)" icon="mind" title="Estrés" when="Hoy" onClick=${onDetail}
+          value=${n(m.avgStress, 1)} unit="de 3" label=${m.highStressMin ? `${hm(m.highStressMin)} en estrés alto` : 'Sin estrés alto'} spark=${sp('avgStress')} />
+        ${temp != null && html`<${HKCard} cat="var(--body)" icon="temp" title="Temperatura de la piel" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/tendencias"
+          value=${`${temp > 0 ? '+' : ''}${n(temp, 1)}`} unit="σ" label="Respecto a tu media" />`}
+        ${status?.settings?.showSpO2 && m.spo2 != null && html`<${HKCard} cat="var(--red)" icon="drop" title="Oxígeno en sangre (exp.)" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} value=${n(m.spo2)} unit="%" spark=${sp('spo2')} />`}
+        ${plan.data?.adapted && html`<${HKCard} cat="var(--activity)" icon="dumbbell" title="Entreno de hoy" when=${`S${plan.data.week}`} href="#/entreno"
+          value=${plan.data.adapted.title} label=${plan.data.note} />`}
+        ${bat?.known && html`<${HKCard} cat="var(--green)" icon="battery" title="Batería de la pulsera" when=${bat.charging ? 'Cargando' : 'Ahora'} href="#/pulsera"
+          value=${n(bat.estimated)} unit="%" label=${bat.charging ? `Llena en ${hm(bat.toFullMinutes)}` : `Le quedan ~${hoursTxt(bat.remainingHours)}`} />`}
+      </div>
+      <${SendToHealth} date=${date} />
+      <button class="btn big" onClick=${onDetail}>Ver todos los datos del día</button>`}
+  </div>`;
+}
+
+const hmShortTxt = (min) => { const x = Math.round(min); return html`${Math.floor(x / 60)}<small>h</small> ${String(x % 60).padStart(2, '0')}<small>min</small>`; };
+const hoursTxt = (h) => (h == null ? '–' : h >= 48 ? `${Math.floor(h / 24)} d ${Math.round(h % 24)} h` : `${Math.round(h)} h`);

@@ -1,6 +1,6 @@
 // App shell: routing, navigation, status polling, global sync control.
 import { html, render, useEffect, useState } from '../vendor/preact-htm.js';
-import { store, useStore, api, toast, ago, useEventTarget } from './core.js';
+import { store, useStore, api, toast, ago, useEventTarget, CAT } from './core.js';
 import { Icon } from './icons.js';
 import { strap, CONN } from './ble/strap.js';
 import { SyncButton, StatusPill } from './layout.js';
@@ -20,7 +20,7 @@ import { JournalView } from './views/journal.js';
 import { SettingsView } from './views/settings.js';
 
 export const ROUTES = [
-  { id: 'hoy', title: 'Hoy', icon: 'today', view: TodayView, group: 'Diario' },
+  { id: 'hoy', title: 'Resumen', icon: 'heart', view: TodayView, group: 'Diario' },
   { id: 'sueno', title: 'Sueño', icon: 'sleep', view: SleepView, group: 'Diario' },
   { id: 'recuperacion', title: 'Recuperación', icon: 'heart', view: RecoveryView, group: 'Diario' },
   { id: 'carga', title: 'Esfuerzo y carga', icon: 'bolt', view: LoadView, group: 'Diario' },
@@ -66,6 +66,8 @@ strap.addEventListener('uploaded', () => setTimeout(() => api('/status').then((s
 poll();
 // Intento de reconexión silenciosa al abrir (si el navegador lo permite).
 setTimeout(() => strap.autoConnect().catch(() => {}), 800);
+// Sube lo que quedara pendiente de una sesión anterior.
+setTimeout(() => strap.upload().catch(() => {}), 1500);
 
 function Sidebar({ route }) {
   const visible = ROUTES.filter((r) => !r.hidden);
@@ -74,24 +76,24 @@ function Sidebar({ route }) {
     <div class="brand"><img class="brand-logo" src="/icon.svg" alt="" /><b>Pulso</b></div>
     <div class="hide-mobile"><${SyncButton} /></div>
     ${groups.map((g) => html`<nav class="nav nav-group"><span class="label">${g}</span>
-      ${visible.filter((r) => r.group === g).map((r) => html`<a href=${`#/${r.id}`} class=${route === r.id ? 'active' : ''}><span class="ic"><${Icon} n=${r.icon} /></span>${r.title}</a>`)}
+      ${visible.filter((r) => r.group === g).map((r) => html`<a href=${`#/${r.id}`} class=${route === r.id ? 'active' : ''}><span class="ic" style=${{ background: CAT[r.icon] || 'var(--accent)' }}><${Icon} n=${r.icon} size=${16} /></span>${r.title}</a>`)}
     </nav>`)}
   </aside>`;
 }
 
 function TabBar({ route }) {
-  const items = { hoy: ['Hoy', 'today'], sueno: ['Sueño', 'sleep'], carga: ['Carga', 'bolt'], pulsera: ['Pulsera', 'watch'], mas: ['Más', 'grid'] };
+  const items = { hoy: ['Resumen', 'heart'], sueno: ['Sueño', 'sleep'], carga: ['Carga', 'bolt'], pulsera: ['Pulsera', 'watch'], mas: ['Explorar', 'grid'] };
   const inMore = !TABS.includes(route);
   return html`<nav class="tabbar">${TABS.map((t) => html`<a href=${`#/${t}`} class=${route === t || (t === 'mas' && inMore) ? 'active' : ''}>
-    <span class="ic"><${Icon} n=${items[t][1]} size=${22} /></span>${items[t][0]}</a>`)}</nav>`;
+    <span class="ic"><${Icon} n=${items[t][1]} size=${24} /></span>${items[t][0]}</a>`)}</nav>`;
 }
 
 function MoreView() {
   return html`<div class="page">
-    <div class="topbar"><h1>Más</h1><${StatusPill} /></div>
+    <div class="topbar"><h1>Explorar</h1><${StatusPill} /></div>
     <${SyncButton} big />
     <div class="card">${ROUTES.filter((r) => !TABS.includes(r.id) && !r.hidden).map((r) => html`
-      <a class="list-item" href=${`#/${r.id}`} style="color:inherit"><span class="ic"><${Icon} n=${r.icon} /></span><span class="grow">${r.title}</span><${Icon} n="chev" /></a>`)}
+      <a class="list-item" href=${`#/${r.id}`} style="color:inherit"><span class="ic" style=${{ background: CAT[r.icon] || 'var(--accent)' }}><${Icon} n=${r.icon} size=${17} /></span><span class="grow">${r.title}</span><span class="muted"><${Icon} n="chev" /></span></a>`)}
     </div></div>`;
 }
 
@@ -108,4 +110,5 @@ function App() {
   </div>`;
 }
 
+window.pulso = { strap, store };   // acceso para depuración desde la consola
 render(html`<${App} />`, document.getElementById('app'));

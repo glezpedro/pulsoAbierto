@@ -8,6 +8,7 @@ import { strap, CONN } from './ble/strap.js';
 export function SyncButton({ big }) {
   useEventTarget(strap);
   const s = strap.s;
+  if (big && s.conn === 'syncing') return null;   // the progress card takes its place
   const busy = ['choosing', 'connecting', 'pairing', 'handshaking', 'syncing', 'uploading'].includes(s.conn);
   const onClick = async () => {
     try {
@@ -44,6 +45,7 @@ export function StatusPill() {
 export function Page({ title, right, children }) {
   return html`<div class="page">
     <div class="topbar"><h1>${title}</h1><div class="row">${right}<${StatusPill} /></div></div>
+    <${SyncProgress} />
     ${children}
   </div>`;
 }
@@ -59,4 +61,32 @@ function batteryChip(e, s) {
   const cls = charging ? '' : lvl <= 15 ? 'bad' : lvl <= 30 ? 'warn' : 'muted';
   return html`<a href="#/pulsera" class=${cls} style="color:inherit;display:inline-flex;gap:4px;align-items:center" title="Batería de la pulsera">
     · <${Icon} n="battery" size=${13} /> ${Math.round(lvl)} %${charging ? ' ⚡' : ''}${left ? html`<span class="muted"> · ${left}</span>` : null}</a>`;
+}
+
+/** Download / upload progress with percentage, ETA and a safe cancel button. */
+export function SyncProgress() {
+  useEventTarget(strap);
+  const s = strap.s;
+  const downloading = s.conn === 'syncing';
+  const uploading = !downloading && s.pending > 0;
+  if (!downloading && !uploading) return null;
+  const p = s.prog;
+  const fmt = (sec) => (sec == null ? 'calculando…' : sec < 60 ? `${Math.max(1, Math.round(sec))} s` : sec < 3600 ? `${Math.floor(sec / 60)} min ${String(Math.round(sec % 60)).padStart(2, '0')} s` : `${Math.floor(sec / 3600)} h ${Math.round((sec % 3600) / 60)} min`);
+  const since = p ? new Date(p.firstTs * 1000).toLocaleString('es-ES', { weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
+  const upTotal = s.uploaded + s.pending * 1;
+  return html`<div class="sync-card" role="status" aria-live="polite">
+    ${downloading ? html`
+      <div class="row between"><b>Descargando de la pulsera</b><b class="num">${p?.pct != null ? `${Math.floor(p.pct)} %` : '…'}</b></div>
+      <div class=${`progress ${p?.pct == null ? 'indet' : ''}`}><i style=${{ width: `${p?.pct || 0}%` }}></i></div>
+      <div class="row between small muted">
+        <span>${s.records.toLocaleString('es-ES')} registros${p?.rate ? ` · ${Math.round(p.rate)}× tiempo real` : ''}</span>
+        <span>Queda ${fmt(p?.etaSec)}</span></div>
+      ${since && html`<div class="tiny muted">Datos desde ${since} · ${s.chunks} bloques ya guardados en el móvil</div>`}
+      <div class="row between"><span class="tiny muted">Mantén la pantalla encendida y Bluefy abierto.</span>
+        <button class="btn small danger" onClick=${() => strap.cancelSync()}>Cancelar</button></div>`
+    : html`
+      <div class="row between"><b>Subiendo al servidor</b><span class="small muted">${s.pending} bloques pendientes</span></div>
+      <div class="progress indet"><i></i></div>
+      <div class="tiny muted">Puedes cerrar la app: lo pendiente está guardado en el móvil y se subirá al volver a abrirla.</div>`}
+  </div>`;
 }

@@ -50,6 +50,13 @@ export function useApi(path, deps = []) {
   return { ...st, reload: load };
 }
 
+export function useIsMobile() {
+  const q = '(max-width: 860px)';
+  const [m, setM] = useState(() => matchMedia(q).matches);
+  useEffect(() => { const mq = matchMedia(q); const f = () => setM(mq.matches); mq.addEventListener('change', f); return () => mq.removeEventListener('change', f); }, []);
+  return m;
+}
+
 export function useEventTarget(target, ev = 'change') {
   const [, force] = useState(0);
   useEffect(() => { const f = () => force((x) => x + 1); target.addEventListener(ev, f); return () => target.removeEventListener(ev, f); }, [target]);
@@ -117,16 +124,49 @@ export function slope(xs, ys) {
 }
 export const needOf = (n) => (n ? Math.max(240, n.baselineMin + n.strainMin + n.debtMin - n.napCreditMin) : null);
 
-// ------------------------------------------------------------ colors
-export const C = {
-  accent: '#00dcb8', strain: '#3d8bff', sleep: '#8c7bff', green: '#17d966', yellow: '#ffcc1a', red: '#ff4545',
-  orange: '#ff8c33', hr: '#ff5468', deep: '#5a40f2', light: '#8ca6ff', rem: '#a6d9ff', awake: '#f29a8c', muted: '#8e9aa5', line: '#232a33',
+// ------------------------------------------------------------ colors (read from CSS, follow light/dark)
+const COLOR_VARS = {
+  accent: '--accent', strain: '--strain', sleep: '--sleep', green: '--green', yellow: '--yellow', red: '--red', orange: '--orange',
+  hr: '--hr', heart: '--heart', deep: '--deep', light: '--light', rem: '--rem', awake: '--awake', muted: '--muted', line: '--line',
+  body: '--body', mind: '--mind', resp: '--resp', fg: '--fg', panel: '--panel', fill: '--fill', activity: '--activity',
 };
+export const C = {
+  accent: '#007aff', strain: '#ff9500', sleep: '#30b0c7', green: '#34c759', yellow: '#ffcc00', red: '#ff3b30', orange: '#ff9500',
+  hr: '#ff2d55', heart: '#ff2d55', deep: '#5856d6', light: '#0a84ff', rem: '#5ac8fa', awake: '#ff8a65', muted: '#8e8e93', line: 'rgba(60,60,67,.16)',
+  body: '#af52de', mind: '#00c7be', resp: '#32ade6', fg: '#000', panel: '#fff', fill: 'rgba(118,118,128,.12)', activity: '#ff9500',
+};
+export function readColors() {
+  try {
+    const cs = getComputedStyle(document.documentElement);
+    for (const [k, v] of Object.entries(COLOR_VARS)) { const x = cs.getPropertyValue(v).trim(); if (x) C[k] = x; }
+  } catch { /* SSR / tests */ }
+}
+readColors();
+try {
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readColors(); window.dispatchEvent(new Event('themechange')); store.bump(); });
+} catch { /* ignore */ }
+/** '#rrggbb' + alpha → rgba() (falls back to the colour itself). */
+export function alpha(color, a) {
+  const m = /^#([0-9a-f]{6})$/i.exec(color || '');
+  if (!m) return color;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
 export const recColor = (v) => (v == null ? C.muted : v >= 67 ? C.green : v >= 34 ? C.yellow : C.red);
 export const recBand = (v) => (v == null ? '' : v >= 67 ? 'green' : v >= 34 ? 'yellow' : 'red');
-export const ZONE_COLORS = ['#4a5560', '#8cbfff', '#33cc80', '#ffcc33', '#ff8033', '#ff4050'];
+export const ZONE_COLORS = ['#8e8e93', '#5ac8fa', '#34c759', '#ffcc00', '#ff9500', '#ff3b30'];
 export const ZONES = ['Reposo', 'Z1 50–60 %', 'Z2 60–70 %', 'Z3 70–80 %', 'Z4 80–90 %', 'Z5 90–100 %'];
-export const STAGES = [{ k: 0, n: 'Despierto', c: C.awake }, { k: 1, n: 'Ligero', c: C.light }, { k: 2, n: 'Profundo', c: C.deep }, { k: 3, n: 'REM', c: C.rem }];
+export const STAGES = [
+  { k: 0, n: 'Despierto', get c() { return C.awake; } }, { k: 1, n: 'Básico', get c() { return C.light; } },
+  { k: 2, n: 'Profundo', get c() { return C.deep; } }, { k: 3, n: 'REM', get c() { return C.rem; } },
+];
+/** Category colour per icon name (Salud-style headers). */
+export const CAT = {
+  heart: 'var(--heart)', live: 'var(--heart)', sleep: 'var(--sleep)', bolt: 'var(--activity)', dumbbell: 'var(--activity)',
+  trend: 'var(--accent)', report: 'var(--accent)', today: 'var(--accent)', grid: 'var(--accent)', body: 'var(--body)',
+  book: 'var(--mind)', stress: 'var(--mind)', wind: 'var(--mind)', spark: 'var(--deep)', battery: 'var(--green)',
+  watch: 'var(--muted)', bt: 'var(--accent)', sync: 'var(--accent)', send: 'var(--accent)', trophy: 'var(--orange)', plus: 'var(--accent)',
+};
 
 // ------------------------------------------------------------ markdown (tiny, safe)
 function esc(s) { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
