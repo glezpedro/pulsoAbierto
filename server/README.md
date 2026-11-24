@@ -87,7 +87,7 @@ Tailscale HTTPS (tailscale serve) ──▶ 127.0.0.1:8090 ── contenedor "pu
 **Seguridad**:
 - El contenedor solo escucha en `127.0.0.1`.
 - Tailscale lo publica únicamente en tu tailnet.
-- Para limitarlo a tu usuario de Tailscale, descomenta `PULSO_ALLOWED_LOGINS` en `compose.yaml`.
+- Para limitarlo a tu usuario de Tailscale, descomenta `PULSO_ALLOWED_LOGINS` en `compose.yaml`. Aun así, `GET /api/health` sigue respondiendo sin login (solo devuelve `{"ok":true}`) para que funcionen el healthcheck del contenedor y Uptime Kuma.
 - Las claves (Anthropic, Telegram, Strava) se guardan en el volumen de datos del servidor.
 
 ## Limitaciones

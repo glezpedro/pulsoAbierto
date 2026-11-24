@@ -38,9 +38,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Pulso", lifespan=lifespan)
 
 
+def _public(request: Request) -> bool:
+    """Routes reachable without a Tailscale login: the liveness probe (container HEALTHCHECK and
+    Uptime Kuma call it from 127.0.0.1 without headers; it only returns {"ok": true}) and the
+    Strava OAuth callback. Exact path + method match, so /api/health/* and /api/status stay protected."""
+    path, method = request.url.path, request.method
+    return (method == "GET" and path == "/api/health") or path == "/api/strava/callback"
+
+
 @app.middleware("http")
 async def tailnet_guard(request: Request, call_next):
-    if ALLOWED_LOGINS and request.url.path.startswith("/api") and request.url.path != "/api/strava/callback":
+    if ALLOWED_LOGINS and request.url.path.startswith("/api") and not _public(request):
         login = (request.headers.get("Tailscale-User-Login") or "").lower()
         if login not in ALLOWED_LOGINS:
             return JSONResponse({"detail": "No autorizado"}, status_code=403)
