@@ -4,21 +4,15 @@ import { Card, Stat, Spinner, ChartBox, timeX } from '../ui.js';
 import { Page, SyncButton } from '../layout.js';
 import { strap, CONN } from '../ble/strap.js';
 import { Icon } from '../icons.js';
+import { AlarmControl } from './alarm.js';
 
 export function StrapView() {
   useEventTarget(strap);
   const { status } = useStore();
   const log = useApi('/sync/log?limit=20');
   const events = useApi('/events?limit=40');
-  const [alarm, setAlarm] = useState(status?.profile?.wakeTime || '07:00');
   const s = strap.s;
   const dev = status?.device || {};
-  const setAlarmNow = async () => {
-    const [h, m] = alarm.split(':').map(Number);
-    const d = new Date(); d.setHours(h, m, 0, 0); if (d < new Date()) d.setDate(d.getDate() + 1);
-    const ok = await strap.setAlarm(d);
-    toast(ok ? `Alarma programada en la pulsera: ${d.toLocaleString('es-ES', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : 'La pulsera no confirmó la alarma');
-  };
   return html`<${Page} title="Pulsera">
     <div class="grid">
       <${BatteryCard} />
@@ -43,10 +37,7 @@ export function StrapView() {
           <button class="btn" disabled=${!strap.connected} onClick=${() => strap.disconnect()}>Desconectar</button>
           <button class="btn danger" onClick=${() => strap.forget()}>Olvidar pulsera</button>
         </div>
-        <div class="field"><label>Despertador en la pulsera (vibra aunque el móvil esté lejos)</label>
-          <div class="row"><input type="time" value=${alarm} onChange=${(e) => setAlarm(e.target.value)} style="width:auto" />
-          <button class="btn small" disabled=${!strap.connected} onClick=${setAlarmNow}>Programar</button>
-          <button class="btn small" disabled=${!strap.connected} onClick=${() => strap.disableAlarm().then(() => toast('Alarma desactivada'))}>Quitar</button></div></div>
+        <div class="field"><label>Despertador en la pulsera (vibra aunque el móvil esté lejos)</label><${AlarmControl} /></div>
         <div class="small muted"><b>Cómo funciona la sincronización:</b> la pulsera guarda días de datos segundo a segundo. Al pulsar Sincronizar, Bluefy los descarga, los guarda primero en el móvil (para no perder nada) y después la pulsera borra solo lo confirmado. Luego se suben al servidor, que lo analiza todo. Mantén la pantalla encendida hasta que termine (1–3 min por día de datos).</div>
         <div class="small muted"><b>Primera vez:</b> cierra la app oficial de WHOOP (solo una app puede tener la pulsera), pulsa Conectar y acepta el emparejamiento de iOS.</div><//>
       <${Card} span="12" title="Pulsera de segunda mano" icon=${html`<${Icon} n="watch" />`}><${SecondHand} status=${status} /><//>

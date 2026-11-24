@@ -3,6 +3,7 @@ import { useApi, useStore, store, api, toast, n, hm, hmShort, hhmm, dayTitle, ad
 import { Card, Tile, Stat, Ring, ChartBox, timeX, ZoneBar, Md, Empty, Spinner, HKCard } from '../ui.js';
 import { Page, SyncButton, SyncProgress } from '../layout.js';
 import { SendToHealth } from './health.js';
+import { AlarmSummary } from './alarm.js';
 import { Icon } from '../icons.js';
 
 export function DayNav() {
@@ -278,6 +279,7 @@ function HealthSummary({ onDetail }) {
         <button class="btn small" aria-label="Día siguiente" disabled=${isToday(date)} onClick=${() => store.set({ date: addDays(date, 1) })}><${Icon} n="chev" /></button></div></div>
     <${SyncProgress} />
     <${SyncButton} big />
+    ${isToday(date) && html`<div class="hk-list"><${AlarmSummary} /></div>`}
     ${day.loading && !day.data && html`<div class="row"><${Spinner} /> Cargando…</div>`}
     ${day.data && !has && html`<div class="hk-card"><${Empty} icon="⌚" title="Sin datos para este día">Conecta la pulsera con el botón de arriba para descargar tus datos.<//></div>`}
     ${has && html`

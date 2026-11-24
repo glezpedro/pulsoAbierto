@@ -54,6 +54,7 @@ async function poll() {
     const running = s.analysis.running || s.dirty > 0;
     const changed = (s.analysis.lastRun && s.analysis.lastRun !== lastRun) || (wasRunning && !running);
     lastRun = s.analysis.lastRun; wasRunning = running;
+    strap.serverSettings = s.settings;
     store.set({ status: s, offline: false });
     if (changed) store.bump();
     setTimeout(poll, running ? 2500 : 15000);
@@ -62,6 +63,7 @@ async function poll() {
     setTimeout(poll, 8000);
   }
 }
+strap.addEventListener('alarm', () => api('/status').then((s) => store.set({ status: s })).catch(() => {}));
 strap.addEventListener('uploaded', () => setTimeout(() => api('/status').then((s) => store.set({ status: s })).catch(() => {}), 1500));
 poll();
 // Intento de reconexión silenciosa al abrir (si el navegador lo permite).

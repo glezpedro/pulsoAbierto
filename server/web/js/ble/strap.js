@@ -182,6 +182,7 @@ class Strap extends EventTarget {
     await this.send(CMD.getDataRange);
     const b = await this.send(CMD.getBattery);
     if (b) this.set({ battery: read.battery(b) });
+    await this.readAlarm();
     this.set({ conn: 'ready' });
     this.postDevice();
     // Battery readings every 60 s while connected: they feed the time-left / time-to-full estimates.
@@ -299,8 +300,10 @@ class Strap extends EventTarget {
     if (e.code === 10) p.worn = false;
     if (e.code === 33) p.liveOn = true;
     if (e.code === 34) p.liveOn = false;
+    if (e.code === 57) this.saveAlarm(null, Math.floor(Date.now() / 1000));   // 58 = «Hacer vibrar» desde la app
+    if (e.code === 59) this.saveAlarm(null);
     if (Object.keys(p).length) { this.set(p); this.postDevice(); }
-    if ([7, 8, 9, 10, 13, 14, 57].includes(e.code)) queue.putEvent({ ts: Math.floor(Date.now() / 1000), code: e.code, label }).catch(() => {});
+    if ([7, 8, 9, 10, 13, 14, 57, 58, 59].includes(e.code)) queue.putEvent({ ts: Math.floor(Date.now() / 1000), code: e.code, label }).catch(() => {});
     this.dispatchEvent(new CustomEvent('strapevent', { detail: e }));
   }
 
@@ -408,8 +411,39 @@ class Strap extends EventTarget {
   // ------------------------------------------------------------ actions
   async setLive(on) { await this.send(CMD.toggleGenericHR, [on ? 1 : 0]); this.set({ liveOn: on }); if (!on) this.set({ liveHR: null }); }
   async buzz() { await this.send(CMD.runHaptics, payload.haptics()); await this.send(CMD.runAlarm, [1]); }
-  async setAlarm(date) { const r = await this.send(CMD.setAlarm, payload.alarm(date)); return r?.result === 1; }
-  async disableAlarm() { await this.send(CMD.disableAlarm, [1]); }
+  async setAlarm(date) {
+    const r = await this.send(CMD.setAlarm, payload.alarm(date));
+    const ok = r?.result === 1;
+    if (ok) this.saveAlarm(date);
+    return ok;
+  }
+  async disableAlarm() { const r = await this.send(CMD.disableAlarm, [1]); if (r) this.saveAlarm(null); return !!r; }
+  /** Ask the strap which alarm it holds (read-only). Only trusted when the reply contains a plausible time. */
+  async readAlarm() {
+    try {
+      const r = await this.send(CMD.getAlarm, [0], 3000);
+      if (!r) return;
+      this.log(`Alarma en la pulsera: ${hex(r.body)}`);
+      const d = read.alarm(r);
+      // The reply may still carry an alarm that was removed or already rang: adopt it only if nothing
+      // is stored and it isn't the one we cleared.
+      const st = this.serverSettings || {};
+      const at = d ? Math.floor(d / 1000) : null;
+      if (at && !st.alarmAt && at !== st.alarmCleared) this.saveAlarm(d, undefined, true);
+    } catch { /* optional */ }
+  }
+  /** Remember the programmed alarm on the server so every screen (and the desktop) can show it. */
+  saveAlarm(date, rangAt, fromStrap = false) {
+    const at = date ? Math.floor(date.getTime() / 1000) : null;
+    if (fromStrap && at === this.s.alarmAt) return;
+    const body = { alarmAt: at };
+    const prev = this.s.alarmAt ?? this.serverSettings?.alarmAt;
+    if (!date && prev) body.alarmCleared = prev;
+    if (rangAt !== undefined) body.alarmRangAt = rangAt;
+    this.set({ alarmAt: at });
+    fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then(() => this.dispatchEvent(new Event('alarm'))).catch(() => {});
+  }
   async refreshBattery() {
     const b = await this.send(CMD.getBattery);
     const v = b ? read.battery(b) : null;

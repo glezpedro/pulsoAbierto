@@ -272,6 +272,8 @@ export const read = {
     const n = [0, 1, 2, 3].map((i) => u32(r.body, 17 + i * 4)).join('.');
     return `MAXIM ${h} · NORDIC ${n}`;
   },
+  /** GET_ALARM reply: the body layout is undocumented, so look for a plausible upcoming unix time. */
+  alarm: (r) => { const now = Date.now() / 1000; for (let o = 0; o <= r.body.length - 4; o++) { const v = u32(r.body, o); if (v > now - 3600 && v < now + 8 * 86400) return new Date(v * 1000); } return null; },
   clock: (r) => { const now = Date.now() / 1000; for (let o = 0; o < Math.min(6, r.body.length - 3); o++) { const v = u32(r.body, o); if (v > 1.5e9 && Math.abs(v - now) < 5 * 365 * 86400) return new Date(v * 1000); } return null; },
 };
 
