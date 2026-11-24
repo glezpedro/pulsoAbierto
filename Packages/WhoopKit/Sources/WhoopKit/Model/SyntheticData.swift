@@ -59,7 +59,7 @@ public struct SyntheticGenerator {
                 phase += 2 * .pi * breathHz * lastRR / 1000
                 let base = 60000 / targetHR
                 let rr = base + variability * 1.1 * sin(phase) + rng.normal() * variability * 0.5
-                lastRR = 0.7 * lastRR + 0.3 * rr
+                lastRR = 0.25 * lastRR + 0.75 * rr
                 elapsed += lastRR
                 if rrs.count < 4 { rrs.append(UInt16(clamping: Int(lastRR.rounded()))) }
             }

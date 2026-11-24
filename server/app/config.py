@@ -1,0 +1,24 @@
+"""Runtime configuration (environment variables)."""
+import os
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+DATA_DIR = Path(os.environ.get("PULSO_DATA", "/data"))
+SAMPLES_DIR = DATA_DIR / "samples"
+DB_PATH = DATA_DIR / "pulso.db"
+BACKUP_DIR = DATA_DIR / "backups"
+ENGINE = os.environ.get("PULSO_ENGINE", "/usr/local/bin/pulso-engine")
+WEB_DIR = Path(os.environ.get("PULSO_WEB", str(Path(__file__).resolve().parent.parent / "web")))
+TZ_NAME = os.environ.get("TZ", "Europe/Madrid")
+TZ = ZoneInfo(TZ_NAME)
+PUBLIC_URL = os.environ.get("PULSO_PUBLIC_URL", "https://tu-servidor.tu-tailnet.ts.net").rstrip("/")
+# Optional: comma-separated Tailscale logins allowed (uses the Tailscale-User-Login header added by `tailscale serve`)
+ALLOWED_LOGINS = [x.strip().lower() for x in os.environ.get("PULSO_ALLOWED_LOGINS", "").split(",") if x.strip()]
+# Optional secrets via env (can also be set from the web UI)
+ENV_TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+ENV_TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+ENV_ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+DISABLE_BACKGROUND = os.environ.get("PULSO_NO_BACKGROUND", "") == "1"
+
+for d in (DATA_DIR, SAMPLES_DIR, BACKUP_DIR):
+    d.mkdir(parents=True, exist_ok=True)

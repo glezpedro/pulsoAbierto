@@ -1,0 +1,24 @@
+# Stack de Dockge: /opt/stacks/pulso/compose.yaml  (el código va en /opt/stacks/pulso/src)
+services:
+  pulso:
+    build:
+      context: ./src
+      dockerfile: server/Dockerfile
+    image: pulso:latest
+    container_name: pulso
+    restart: unless-stopped
+    ports:
+      # solo en localhost: se publica en tu tailnet con `tailscale serve` (HTTPS)
+      - "127.0.0.1:8090:8090"
+    environment:
+      - TZ=Europe/Madrid
+      - PULSO_PUBLIC_URL=https://tu-servidor.tu-tailnet.ts.net
+      # Opcional: restringir a tu usuario de Tailscale (cabecera que añade `tailscale serve`)
+      # - PULSO_ALLOWED_LOGINS=tu-usuario@ejemplo.com
+      # Opcional: también se pueden poner desde la web (Ajustes)
+      # - TELEGRAM_TOKEN=
+      # - ANTHROPIC_API_KEY=
+    volumes:
+      - ./data:/data
+      - /etc/localtime:/etc/localtime:ro
+    mem_limit: 768m

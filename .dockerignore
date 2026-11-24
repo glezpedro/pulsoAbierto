@@ -1,0 +1,8 @@
+.git
+**/.build
+**/.swiftpm
+Pulso
+*.xcodeproj
+server/tests
+docs
+.github

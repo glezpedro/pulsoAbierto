@@ -6,6 +6,9 @@ estrés y mucho más. Incluye planes de entrenamiento adaptativos, integración 
 y **Apple Salud**, y un **coach con IA** (Claude) que conoce todos tus datos.
 
 > Investigación del dispositivo y del protocolo: [`docs/INVESTIGACION_WHOOP4.md`](docs/INVESTIGACION_WHOOP4.md)
+>
+> **¿Sin firmar apps?** Hay una versión web autoalojada (Docker + Tailscale + Bluefy) con informes semanales, Telegram y todo lo demás:
+> [`server/README.md`](server/README.md). Instalación: `sudo bash server/install.sh`.
 
 ---
 

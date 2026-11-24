@@ -23,7 +23,7 @@ enum DemoDataService {
                 bedtime: ds - 90 * 60 + bedJitter, wake: ds + 7 * 3600 + 10 * 60 + wakeJitter,
                 restingHR: 52 + gen.normal() * 1.5 + (i % 7 == 0 ? 3 : 0),
                 rmssd: 62 + gen.normal() * 9 - (i % 7 == 0 ? 12 : 0),
-                workout: workout ? (ds + 18 * 3600 + Int(gen.unit() * 3600), 45 + Int(gen.unit() * 35), intensity) : nil)
+                workout: workout ? (ds + 16 * 3600 + Int(gen.unit() * 1800), 45 + Int(gen.unit() * 35), intensity) : nil)
             let from = ds - 6 * 3600
             let to = min(ds + 18 * 3600, now)
             guard to > from else { continue }

@@ -96,7 +96,10 @@ public enum SleepAnalyzer {
         guard let hrP50 = Stats.percentile(hrs, 50) else { return [] }
         let motions = epochs.compactMap { $0.hasData ? $0.motion : nil }
         let hasMotion = motions.count > epochs.count / 2
-        let stillThreshold = max(2.0, (Stats.percentile(motions, 25) ?? 0) * 3 + 1.5)
+        // "still" = well below this person's typical waking movement (robust to sensor scale)
+        let p25m = Stats.percentile(motions, 25) ?? 0
+        let p75m = Stats.percentile(motions, 75) ?? 0
+        let stillThreshold = max(4.0, p25m * 3 + 2, min(20.0, 0.08 * p75m))
 
         // 1) candidate minutes: still + HR in the lower half of the window
         var cand = [Bool](repeating: false, count: n)
