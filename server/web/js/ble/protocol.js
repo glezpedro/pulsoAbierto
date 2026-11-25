@@ -279,6 +279,18 @@ export function packFrames(frames) {
 }
 export function splitFrames(bytes) { return new FrameAssembler().push(bytes); }
 
+/** Printable text of firmware console-log frames (type 50). */
+export function logText(frames) {
+  let out = '';
+  for (const f of frames) {
+    if (f[4] !== TYPE.logs) continue;
+    const len = f[1] | (f[2] << 8);
+    // [7..17) is a binary header (timestamp, counters); the text follows, split across frames
+    for (let i = len > 17 ? 17 : 7; i < len; i++) { const c = f[i]; out += c >= 0x20 && c < 0x7f ? String.fromCharCode(c) : c === 10 ? '\n' : ''; }
+  }
+  return out;
+}
+
 /** Short description of a frame for the diagnostic log: type, length and the first bytes. */
 export function describeFrame(f, n = 32) { return `tipo ${f[4]} · ${f.length} B · ${hex(f.slice(0, n))}`; }
 
@@ -307,6 +319,18 @@ export function encodeSamples(samples) {
 // ---------------------------------------------------------------- payloads & responses
 export const payload = {
   setClock: (d = new Date()) => { const t = Math.floor(d.getTime() / 1000); return [t & 255, (t >>> 8) & 255, (t >>> 16) & 255, (t >>> 24) & 255, 0, 0, 0, 0]; },
+  /** SET_CLOCK layouts seen in the community for WHOOP 4.0 firmwares. The one that works is learnt by
+   *  reading the clock back (see Strap.syncClock) and remembered. */
+  setClockVariants: (d = new Date()) => {
+    const t = Math.floor(d.getTime() / 1000);
+    const le = [t & 255, (t >>> 8) & 255, (t >>> 16) & 255, (t >>> 24) & 255];
+    return [
+      { id: 'ts+4', bytes: [...le, 0, 0, 0, 0] },
+      { id: 'ts+5', bytes: [...le, 0, 0, 0, 0, 0] },
+      { id: '1+ts+4', bytes: [1, ...le, 0, 0, 0, 0] },
+      { id: 'ts', bytes: [...le] },
+    ];
+  },
   alarm: (d) => { const t = Math.floor(d.getTime() / 1000); return [1, t & 255, (t >>> 8) & 255, (t >>> 16) & 255, (t >>> 24) & 255, 0, 0, 0, 0]; },
   haptics: (pattern = 2, loops = 3) => [pattern, loops, 0, 0, 0],
   ack: (block) => [1, ...Array.from(block).slice(0, 8), ...new Array(Math.max(0, 8 - block.length)).fill(0)],
@@ -326,7 +350,7 @@ export const read = {
   alarm: (r) => { const now = Date.now() / 1000; for (let o = 0; o <= r.body.length - 4; o++) { const v = u32(r.body, o); if (v > now - 3600 && v < now + 8 * 86400) return new Date(v * 1000); } return null; },
   /** GET_CLOCK reply layout is undocumented: every u32 of the first bytes is a candidate. The real offset
    *  is learnt after SET_CLOCK (the candidate that then matches the phone time). */
-  clockCandidates: (r) => { const out = []; for (let o = 0; o + 4 <= Math.min(r.body.length, 12); o++) out.push({ o, v: u32(r.body, o) }); return out; },
+  clockCandidates: (r) => { const out = []; for (let o = 0; o + 4 <= r.body.length; o++) out.push({ o, v: u32(r.body, o) }); return out; },
   clockAt: (r, o) => (o != null && o + 4 <= r.body.length ? u32(r.body, o) : null),
   /** Offset of the candidate within `tol` seconds of `nowS`, or null. */
   clockOffsetNear: (r, nowS, tol = 120) => { let best = null; for (const c of read.clockCandidates(r)) { const d = Math.abs(c.v - nowS); if (d <= tol && (!best || d < best.d)) best = { o: c.o, d }; } return best ? best.o : null; },

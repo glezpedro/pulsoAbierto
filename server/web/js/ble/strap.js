@@ -9,7 +9,7 @@
 //  4. The strap clock is read and, if wrong, set BEFORE asking for the history. If it was wrong, the
 //     measured offset is used to fix the timestamps of the records written with that wrong clock.
 import { UUID, TYPE, CMD, EVENTS, FrameAssembler, buildFrame, parse, decodeChunk, encodeSamples, payload, read, parseHeartRate,
-  hex, u32, packFrames, splitFrames, describeFrame, TS_MIN } from './protocol.js';
+  hex, u32, packFrames, splitFrames, describeFrame, logText, TS_MIN } from './protocol.js';
 import { queue, flush, uploadChunk } from './queue.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -252,15 +252,27 @@ class Strap extends EventTarget {
     this.log(`Reloj de la pulsera al conectar: ${before ? `${byte != null ? fmtTs(strapBefore) : 'formato aún desconocido'} · bytes ${hex(before.body)}` : 'sin respuesta'}`, okBefore ? 'info' : 'warn');
 
     let ok = okBefore, after = null, strapAfter = okBefore ? strapBefore : null, tAfter = t0;
-    for (let i = 1; !ok && i <= 3; i++) {
-      const sc = await this.send(CMD.setClock, payload.setClock());
-      await sleep(300);
+    // Try the remembered SET_CLOCK layout first, then the other known layouts; each one is checked by
+    // reading the clock back. The first that works is remembered for next time.
+    const known = localStorage.getItem('pulso.clockVariant');
+    const variants = payload.setClockVariants();
+    variants.sort((a, b) => (b.id === known) - (a.id === known));
+    let attempt = 0;
+    for (const vr of [...variants, ...variants]) {     // two rounds: the strap sometimes ignores a command
+      if (ok) break;
+      attempt++;
+      const bytes = payload.setClockVariants().find((x) => x.id === vr.id).bytes;   // fresh time for every attempt
+      const sc = await this.send(CMD.setClock, bytes);
+      await sleep(400);
       after = await this.send(CMD.getClock);
       tAfter = nowS();
       const o = after ? read.clockOffsetNear(after, tAfter, 120) : null;
-      if (o != null) { byte = o; localStorage.setItem('pulso.clockByte', String(o)); strapAfter = read.clockAt(after, o); ok = true; }
-      this.log(`Ajuste de hora ${i}/3: respuesta ${sc ? sc.result : 'ninguna'} → ${after ? `bytes ${hex(after.body)}` : 'sin respuesta'} → ${ok ? 'correcta' : 'sigue sin cuadrar'}`, ok ? 'info' : 'warn');
-      if (!ok) await sleep(800);
+      if (o != null) {
+        byte = o; localStorage.setItem('pulso.clockByte', String(o)); localStorage.setItem('pulso.clockVariant', vr.id);
+        strapAfter = read.clockAt(after, o); ok = true;
+      }
+      this.log(`Ajuste de hora ${attempt}/${variants.length * 2} (formato ${vr.id}): respuesta ${sc ? `${sc.result} ${hex(sc.body)}` : 'ninguna'} → ${after ? `reloj ${hex(after.body)}` : 'sin respuesta'} → ${ok ? 'correcta' : 'sigue sin cuadrar'}`, ok ? 'info' : 'warn');
+      if (!ok) await sleep(300);
     }
     // now that the clock position is known, re-read the value the strap had when we connected
     if (before && byte != null) strapBefore = read.clockAt(before, byte);
@@ -268,6 +280,7 @@ class Strap extends EventTarget {
       const offset = Math.round(t0 - strapBefore);
       if (Math.abs(offset) >= 300) this.addClockFix({ strapAt: strapBefore, offset, measuredAt: Math.round(t0) });
     }
+    if (ok) this.set({ notRecording: false });
     const shown = strapAfter ?? strapBefore;
     const ref = strapAfter != null ? tAfter : t0;
     const rawBody = after || before;
@@ -516,6 +529,32 @@ class Strap extends EventTarget {
     try { id = await queue.putRaw(rec); }
     catch (e) { return this.stopHistory(`No se pudo guardar el bloque en el móvil (${e.message}): NO se confirma y sigue en la pulsera.`); }
     queue.count().then((n) => this.set({ pending: n })).catch(() => {});
+
+    // 2a) a chunk with no sensor data at all, only the strap's own console logs (type 50): it is not
+    //     health data. Kept raw (phone + server) and acknowledged — otherwise the strap re-sends the
+    //     same chunk forever and the real data behind it never arrives.
+    const nonMeta = c.frames.filter((f) => f[4] !== TYPE.metadata && f[4] !== TYPE.puffinMeta);
+    if (!samples.length && !hist.length && nonMeta.every((f) => f[4] === TYPE.logs)) {
+      const txt = logText(c.frames);
+      if (txt) this.log(`Registro interno de la pulsera: ${txt.slice(0, 400)}${txt.length > 400 ? '…' : ''}`, 'rx');
+      const rtc = txt.match(/RTC timestamp (\d+) is invalid; not saving data/);
+      if (rtc && this.s.clockOk !== true) {
+        // the clock could not be set in this connection: the strap is still not recording
+        this.set({ notRecording: true });
+        this.log(`La pulsera dice que NO está guardando datos: su reloj interno (${rtc[1]} s ≈ ${new Date(Number(rtc[1]) * 1000).toISOString().slice(0, 10)}) no es válido. Mientras no tenga la hora, no graba nada.`, 'error');
+      } else if (rtc) {
+        this.log('Estos registros internos son de antes de ponerle la hora: durante ese tiempo la pulsera no guardó datos («RTC timestamp invalid»). Ahora ya tiene la hora y vuelve a grabar.', 'warn');
+      }
+      let res;
+      try { res = await uploadChunk(rec); } catch (e) { return this.stopHistory(`No se pudo subir un bloque de registros internos (${e.message}). NO se confirma.`); }
+      if (!res.rawSaved) return this.stopHistory('El servidor no guardó un bloque de registros internos: NO se confirma.');
+      await queue.markUploaded(id, res).catch(() => {});
+      if (!m.ack || this.stopping) return;
+      const r = await this.send(CMD.historyResult, payload.ack(m.ack));
+      this.set({ chunks: this.s.chunks + 1 });
+      this.log(`Bloque de registros internos de la pulsera (${nonMeta.length} tramas, sin datos de salud): guardado en crudo y confirmado · respuesta ${r?.result ?? 'ninguna'}`);
+      return;
+    }
 
     // 2) nothing valid → diagnose, keep it raw (phone + server), do NOT acknowledge
     if (!samples.length) {

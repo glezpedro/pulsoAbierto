@@ -28,6 +28,7 @@ export function SyncButton({ big }) {
   return html`<div class="col" style="gap:6px">
     ${btn}
     ${connecting && html`<button class="btn small" style="align-self:center" onClick=${() => strap.resetConnection()}>¿Atascado? Reiniciar conexión</button>`}
+    ${s.notRecording && html`<div class="small bad" style="text-align:center"><b>⚠️ La pulsera no está grabando datos:</b> perdió la hora y, sin hora, no guarda nada. Pulso intenta ponérsela al conectar; si el aviso sigue, descarga el registro en Pulsera › Diagnóstico.</div>`}
     ${s.error && !busy && html`<div class="small bad" style="text-align:center">${s.error}</div>`}
     ${!strap.connected && !busy && html`<details class="small muted" style="text-align:center"><summary>¿Ha perdido el vínculo o no aparece en la lista?</summary>${REPAIR_HELP}</details>`}
   </div>`;

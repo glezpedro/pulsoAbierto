@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildFrame, validFrame, FrameAssembler, parse, fromHex, hex, decodeChunk, encodeSamples, payload, detectLayout, parseHeartRate, CMD, TYPE,
-  packFrames, splitFrames, fixTimestamp, read, TS_MIN } from '../web/js/ble/protocol.js';
+  packFrames, splitFrames, fixTimestamp, read, TS_MIN, logText } from '../web/js/ble/protocol.js';
 
 const captured = [
   'aa0800a823080e016c935474', 'aa0800a823070e00c7e40f08', 'aa0800a8230e16001147c585',
@@ -128,4 +128,20 @@ test('battery event keeps its raw bytes for later decoding', () => {
   const e = parse(f);
   assert.equal(e.kind, 'event'); assert.equal(e.battery, 72.5); assert.equal(e.mv, 3830); assert.equal(e.charging, true);
   assert.equal(e.raw, hex(f));
+});
+
+test('firmware console logs (type 50) are read as text across frames', () => {
+  const head = [0x2a, 0x8f, 0xa4, 0x69, 0x08, 0x5b, 0x34, 0x00, 0x01];      // binary header seen on 41.17.6.0
+  const part = (t, seq) => buildFrame(TYPE.logs, seq, 2, [0x00, ...head, ...Buffer.from(t, 'latin1')]);
+  const txt = logText([part(' 34, 427219819: Flash: RTC ti', 1), part('mestamp 31963220 is invalid; not saving data to flash.', 2)]);
+  assert.match(txt, /RTC timestamp 31963220 is invalid; not saving data/);
+});
+
+test('SET_CLOCK layouts carry the same, current time', () => {
+  const d = new Date(NOW * 1000);
+  const v = payload.setClockVariants(d);
+  assert.deepEqual(v.map((x) => x.id), ['ts+4', 'ts+5', '1+ts+4', 'ts']);
+  assert.deepEqual(v[0].bytes, payload.setClock(d));
+  assert.equal(v[1].bytes.length, 9);
+  assert.deepEqual(v[2].bytes.slice(1, 5), le32(NOW));
 });
