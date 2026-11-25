@@ -8,7 +8,7 @@ import secrets as pysecrets
 import httpx
 
 from . import db, reports
-from .core import add_days, local, now, secret, settings, today_key, week_key
+from .core import week_days, add_days, local, now, secret, settings, today_key, week_key
 
 log = logging.getLogger("pulso.telegram")
 state = {"running": False, "username": None, "lastError": None}
@@ -155,10 +155,32 @@ def week_text(wkey: str | None = None) -> str:
     tr = rep["training"]
     out.append(f"• Entrenos {tr['count']} · esfuerzo total {tr['totalStrain']:.0f} · volumen Strong {tr['strongVolumeKg'] / 1000:.1f} t")
     out.append(f"• Carga: {rep['load']['status']}" + (f" (ACWR {rep['load']['acwr']:.2f})" if rep['load']['acwr'] else ""))
+    out += sleep_tips(week_days(wkey)[-1])
     w = db.one("SELECT ai FROM weekly WHERE week_key=?", (wkey,))
     if w and w["ai"]:
         out.append("\n" + w["ai"])
     return "\n".join(out)
+
+
+def sleep_tips(to: str) -> list[str]:
+    """Best bedtime and regularity (from the Sleep section) for the weekly report."""
+    from . import sleepinsights
+    try:
+        ins = sleepinsights.insights(to, 7)
+    except Exception:  # never break the report
+        return []
+    out = []
+    c = ins["current"]
+    if c.get("bedtimeSD") is not None and c["nights"] >= 4:
+        out.append(f"• Te acostaste a las {sleepinsights.fmt_clock(c['bedtime'])} de media (±{c['bedtimeSD']:.0f} min)"
+                   + (f" · regularidad {ins['sri']:.0f}/100" if ins.get("sri") is not None else ""))
+    b = ins.get("bestBedtime")
+    if b and b["delta"] >= 3:
+        rec = ins["outcome"] == "recovery"
+        what, u = ("recuperación", " %") if rec else ("puntuación de sueño", "")
+        out.append(f"• 🛏️ Tu mejor hora para acostarte: **{b['label']}** ({what} media {b['mean']:.0f}{u}, "
+                   f"{b['delta']:.0f} puntos más que el resto)")
+    return out
 
 
 def load_text() -> str:
