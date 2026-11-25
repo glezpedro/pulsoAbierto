@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import analysis, battery, db, hooks, raw, reports, strava, telegram
 from .config import ALLOWED_LOGINS, DB_PATH, DISABLE_BACKGROUND, RAW_DIR, SAMPLES_DIR, WEB_DIR
-from .core import (EngineError, add_days, append_samples_detail, day_bounds, day_key, engine, hr_max, local, now, physio,
+from .core import (EngineError, add_days, append_samples_detail, remove_samples, day_bounds, day_key, engine, hr_max, local, now, physio,
                    profile, reset_sample_cache, sample_stats, secret, settings, today_key, week_key, bmr, DEFAULT_PROFILE, DEFAULT_SETTINGS)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -179,11 +179,21 @@ async def raw_get(chunk_id: int):
     return FileResponse(path, media_type="application/octet-stream", filename=path.name)
 
 
+@app.post("/api/samples/remove")
+async def samples_remove(p: dict = Body(...)):
+    """Deletes the samples of exactly these seconds (repair of records decoded with a wrong layout)."""
+    ts = [int(t) for t in (p.get("ts") or [])][:200000]
+    removed = await asyncio.to_thread(remove_samples, ts)
+    if ts:
+        analysis.mark_dirty(min(ts), max(ts))
+    return {"removed": sum(removed.values())}
+
+
 @app.post("/api/raw/{chunk_id}/samples")
-async def raw_samples(chunk_id: int, request: Request):
+async def raw_samples(chunk_id: int, request: Request, replace: int = 0):
     blob = await request.body()
     try:
-        d = await asyncio.to_thread(raw.add_samples, chunk_id, blob)
+        d = await asyncio.to_thread(raw.add_samples, chunk_id, blob, bool(replace))
     except KeyError:
         raise HTTPException(404, "bloque no encontrado")
     except ValueError as ex:

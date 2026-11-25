@@ -237,19 +237,32 @@ export function fixTimestamp(ts, fixes = []) {
 
 /** Decodes the history frames of one chunk. Only records with a plausible timestamp (after applying the
  *  clock fixes) are returned in `samples`; `stats` counts everything else so nothing disappears silently. */
+/** History record versions known not to contain heart rate (kept raw, never stored as samples). */
+export const NON_HR_VERSIONS = new Set([25]);
+
 export function decodeChunk(frames, { fixes = [], nowS = Date.now() / 1000 } = {}) {
+  // Byte 5 of a history frame is the record version. Version 24 always has the same field positions
+  // (HR @21, R-R @22/23, gravity @40, contact @55, skin temp @72) whatever its length: 96 B on older
+  // firmwares, 104 B on MAXIM 41.17 / NORDIC 17.2. Guessing the layout of a 104-B v24 frame picked a
+  // steady optical value (~90) as the heart rate. Version 25 frames (84 B) carry no heart rate.
   const groups = new Map();
-  for (const f of frames) { if (!groups.has(f.length)) groups.set(f.length, []); groups.get(f.length).push(f); }
+  let v24 = 0, other = 0;
   const decoded = [], notes = [];
+  for (const f of frames) {
+    if ((f[5] === 24 && f.length >= 96) || f.length === 96) { const s = decodeV24(f); if (s) decoded.push(s); v24++; continue; }
+    if (NON_HR_VERSIONS.has(f[5])) { other++; continue; }
+    if (!groups.has(f.length)) groups.set(f.length, []); groups.get(f.length).push(f);
+  }
+  if (v24) notes.push(`v24×${v24}`);
+  if (other) notes.push(`sin FC (v25…)×${other}`);
   for (const [size, list] of groups) {
-    if (size === 96) { list.forEach((f) => { const s = decodeV24(f); if (s) decoded.push(s); }); notes.push(`v24×${list.length}`); }
-    else {
+    {
       const d = detectLayout(list);
       list.forEach((f) => { const s = decodeGeneric(f, d.tsOffset, d.hrOffset); if (s) decoded.push(s); });
       notes.push(`len${size}×${list.length} hr@${d.hrOffset ?? '?'} conf ${d.confidence.toFixed(2)}`);
     }
   }
-  const stats = { frames: frames.length, decoded: decoded.length, valid: 0, fixed: 0, tooOld: 0, future: 0,
+  const stats = { frames: frames.length, decoded: decoded.length, valid: 0, fixed: 0, tooOld: 0, future: 0, nonHR: other,
     rawFirst: null, rawLast: null, first: null, last: null, sizes: [...groups.keys()] };
   const out = [];
   for (const s of decoded) {

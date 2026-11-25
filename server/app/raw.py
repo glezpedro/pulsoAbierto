@@ -72,12 +72,13 @@ def save_chunk(raw_b64: str, samples_b64: str, meta: dict) -> dict:
             "first": d["first"], "last": d["last"]}
 
 
-def add_samples(chunk_id: int, blob: bytes) -> dict:
-    """Stores records recovered by re-parsing a raw chunk (duplicates are harmless: readers de-duplicate)."""
+def add_samples(chunk_id: int, blob: bytes, replace: bool = False) -> dict:
+    """Stores records recovered by re-parsing a raw chunk (duplicates are harmless: readers de-duplicate).
+    replace=True overwrites the samples already stored for those seconds (decoder fixes)."""
     row = db.one("SELECT * FROM raw_chunks WHERE id=?", (chunk_id,))
     if not row:
         raise KeyError(chunk_id)
-    d = append_samples_detail(blob)
+    d = append_samples_detail(blob, replace=replace)
     db.ex("UPDATE raw_chunks SET stored=stored+?, valid=MAX(valid, ?), reprocessed=?, first_ts=COALESCE(first_ts, ?), last_ts=COALESCE(last_ts, ?) WHERE id=?",
           (d["stored"], d["received"], now(), d["first"] or None, d["last"] or None, chunk_id))
     return d

@@ -202,12 +202,44 @@ def _day_ts(day: int) -> set[int]:
     return s
 
 
-def append_samples_detail(blob: bytes) -> dict:
+def remove_samples(ts_list) -> dict[int, int]:
+    """Deletes the stored samples of exactly these seconds (used to repair records that were decoded
+    with a wrong layout). Rewrites each affected day file atomically. Returns {day: removed}."""
+    by_day: dict[int, set[int]] = {}
+    for t in ts_list:
+        t = int(t)
+        by_day.setdefault(t // 86400, set()).add(t)
+    out = {}
+    for day, kill in by_day.items():
+        p = SAMPLES_DIR / f"{day}.bin"
+        if not p.exists():
+            continue
+        b = p.read_bytes()
+        keep, removed = [], 0
+        for o in range(0, len(b) - len(b) % SAMPLE_SIZE, SAMPLE_SIZE):
+            if int.from_bytes(b[o:o + 4], "little") in kill:
+                removed += 1
+            else:
+                keep.append(b[o:o + SAMPLE_SIZE])
+        if removed:
+            tmp = p.with_suffix(".tmp")
+            with open(tmp, "wb") as f:
+                f.write(b"".join(keep))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, p)
+            _ts_cache.pop(day, None)
+        out[day] = removed
+    return out
+
+
+def append_samples_detail(blob: bytes, replace: bool = False) -> dict:
     """Appends raw 32-byte encoded samples and says exactly what happened to each record.
 
     Returns {received, stored, first, last, reasons: {invalid, future, beforeFilter, duplicate}}. Discarded
     records are never silently lost: the caller keeps the raw chunk they came from. A record whose second
-    is already stored (the strap re-sent a chunk) is not written again, so `stored` counts only new data."""
+    is already stored (the strap re-sent a chunk) is not written again, so `stored` counts only new data.
+    With replace=True the stored samples of those same seconds are overwritten instead (repairs)."""
     if len(blob) % SAMPLE_SIZE:
         raise ValueError("tamaño de bloque inválido")
     n = len(blob) // SAMPLE_SIZE
@@ -215,6 +247,8 @@ def append_samples_detail(blob: bytes) -> dict:
     out = {"received": n, "stored": 0, "first": 0, "last": 0, "reasons": reasons}
     if n == 0:
         return out
+    if replace:
+        remove_samples(int.from_bytes(blob[i * 32:i * 32 + 4], "little") for i in range(n))
     by_day: dict[int, list[bytes]] = {}
     first, last = 1 << 62, 0
     cutoff = int(settings().get("ignoreBefore") or 0)

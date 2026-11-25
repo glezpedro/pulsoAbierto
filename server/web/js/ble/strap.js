@@ -9,7 +9,7 @@
 //  4. The strap clock is read and, if wrong, set BEFORE asking for the history. If it was wrong, the
 //     measured offset is used to fix the timestamps of the records written with that wrong clock.
 import { UUID, TYPE, CMD, EVENTS, FrameAssembler, buildFrame, parse, decodeChunk, encodeSamples, payload, read, parseHeartRate,
-  hex, u32, packFrames, splitFrames, describeFrame, logText, TS_MIN } from './protocol.js';
+  hex, u32, packFrames, splitFrames, describeFrame, logText, TS_MIN, NON_HR_VERSIONS, fixTimestamp } from './protocol.js';
 import { queue, flush, uploadChunk } from './queue.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -558,6 +558,20 @@ class Strap extends EventTarget {
       return;
     }
 
+    // 2b) only records of a version without heart rate (v25…) plus logs: no samples by design. Kept raw
+    //     (phone + server) and acknowledged, like the console-log chunks, so the sync keeps going.
+    if (!samples.length && hist.length && stats.nonHR === hist.length) {
+      let res;
+      try { res = await uploadChunk(rec); } catch (e) { return this.stopHistory(`No se pudo subir un bloque (${e.message}). NO se confirma.`); }
+      if (!res.rawSaved) return this.stopHistory('El servidor no guardó un bloque: NO se confirma.');
+      await queue.markUploaded(id, res).catch(() => {});
+      if (!m.ack || this.stopping) return;
+      const r = await this.send(CMD.historyResult, payload.ack(m.ack));
+      this.set({ chunks: this.s.chunks + 1 });
+      this.log(`Bloque de ${hist.length} registros sin frecuencia cardiaca (${note}): guardado en crudo y confirmado · respuesta ${r?.result ?? 'ninguna'}`);
+      return;
+    }
+
     // 2) nothing valid → diagnose, keep it raw (phone + server), do NOT acknowledge
     if (!samples.length) {
       this.log(`Bloque con 0 registros válidos: ${c.frames.length} tramas (${typesTxt || 'ninguna'}), ${hist.length} de historial, `
@@ -626,6 +640,45 @@ class Strap extends EventTarget {
       this.set({ pending });
       if (pending) this.log(`Subida pendiente: ${e.message}. Los datos quedan guardados en el móvil.`, 'warn');
     }
+  }
+
+  /** One-off repair: history chunks decoded with a guessed layout (104-byte v24 records on MAXIM 41.17,
+   *  which took a steady optical value as the heart rate, and v25 records that have no heart rate) are
+   *  decoded again from the raw copy the server keeps. The stored samples of those seconds are replaced,
+   *  and the ones that only came from v25 records are removed. Idempotent; does not need the strap. */
+  async repairDecoding() {
+    const KEY = 'pulso.repair.v24len';
+    try { if (localStorage.getItem(KEY)) return null; } catch { return null; }
+    const r = await fetch('/api/raw?limit=5000');
+    if (!r.ok) return null;
+    const items = ((await r.json()).items || []).filter((it) => /len(84|104)×/.test(it.meta?.note || ''));
+    if (!items.length) { try { localStorage.setItem(KEY, String(Date.now())); } catch { /* ignore */ } return { chunks: 0 }; }
+    this.log(`Corrigiendo la frecuencia cardiaca de ${items.length} bloques ya descargados (formato mal detectado)…`, 'warn');
+    const good = new Set(), bad = new Set();
+    let stored = 0;
+    for (const it of items) {
+      const rb = await fetch(`/api/raw/${it.id}`);
+      if (!rb.ok) throw new Error(`bloque ${it.id}: servidor ${rb.status}`);
+      const frames = splitFrames(new Uint8Array(await rb.arrayBuffer())).filter((f) => f[4] === TYPE.history);
+      const fixes = [...(it.meta?.fixes || []), ...this.clockFixes()];
+      const { samples } = decodeChunk(frames, { fixes });
+      samples.forEach((x) => good.add(x.ts));
+      for (const f of frames) if (NON_HR_VERSIONS.has(f[5])) { const t = u32(f, 11); if (t) bad.add(fixTimestamp(t, fixes).ts); }
+      if (samples.length) {
+        const up = await fetch(`/api/raw/${it.id}/samples?replace=1`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: encodeSamples(samples) });
+        if (!up.ok) throw new Error(`bloque ${it.id}: servidor ${up.status}`);
+        stored += (await up.json()).stored || 0;
+      }
+    }
+    const remove = [...bad].filter((t) => !good.has(t));
+    if (remove.length) {
+      const rr = await fetch('/api/samples/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ts: remove }) });
+      if (!rr.ok) throw new Error(`borrado: servidor ${rr.status}`);
+    }
+    try { localStorage.setItem(KEY, String(Date.now())); } catch { /* ignore */ }
+    this.log(`Corrección hecha: ${stored} registros con la frecuencia cardiaca bien leída · ${remove.length} registros sin FC retirados.`);
+    this.dispatchEvent(new Event('uploaded'));
+    return { chunks: items.length, stored, removed: remove.length };
   }
 
   /** Re-parses the raw chunks the server holds whose records were not stored (for example because the

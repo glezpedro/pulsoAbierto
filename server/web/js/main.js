@@ -71,6 +71,9 @@ poll();
 setTimeout(() => strap.autoConnect().catch(() => {}), 800);
 // Sube lo que quedara pendiente de una sesión anterior.
 setTimeout(() => strap.upload().catch(() => {}), 1500);
+// Corrección única de datos ya descargados con el formato mal detectado (no necesita la pulsera).
+setTimeout(() => strap.repairDecoding().then((r) => { if (r?.stored || r?.removed) toast('Frecuencia cardiaca corregida en los datos ya descargados. Se está recalculando el análisis.', 6000); })
+  .catch((e) => strap.log(`Corrección de datos pendiente: ${e.message}`, 'warn')), 4000);
 
 function Sidebar({ route }) {
   const visible = ROUTES.filter((r) => !r.hidden);

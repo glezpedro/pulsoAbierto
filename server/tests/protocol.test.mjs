@@ -157,3 +157,23 @@ test('SET_CLOCK: official-app layout first (9 bytes with 0x439) and the 5-byte o
   const f = buildFrame(TYPE.command, 1, CMD.setClock, v[0].bytes);
   assert.equal(hex(f).replace(/ /g, ''), 'aa10005723010a2c95f16a3904000000bd1b4689');
 });
+
+test('104-byte v24 records (MAXIM 41.17 / NORDIC 17.2): heart rate at byte 21, not guessed', () => {
+  // real frame from a strap on that firmware (awake, 86 bpm)
+  const f = fromHex('aa6400a12f180548f51101c22e076b785380542201560000000000000000000060d90fccf014953d7bace9becd0cb53d48e1613f00f0ffc67bace9becd0cb53d48e1613f33025d020c0356023a016007010c020c0000000000150001e73600000000000030e30199');
+  assert.equal(f.length, 104);
+  const { samples, note, stats } = decodeChunk([f, f], { nowS: 1795700000 });
+  assert.equal(samples[0].bpm, 86);
+  assert.equal(samples[0].ts, 0x6b072ec2);
+  assert.ok(samples[0].g, 'gravity vector decoded');
+  assert.match(note, /v24×2/);
+  assert.equal(stats.nonHR, 0);
+});
+
+test('v25 records (84 bytes) carry no heart rate and are not stored as samples', () => {
+  const v25 = fromHex('aa50000c2f190077f80000d231076b280f0400e968020019feeafdc2fe54ffa3fe26feb1fe30ff25006200fffe4bfed6fce9fcb7fd2200bb02e903ff00edfd65fa3af82bf87ffa480c113e6007010000acde2563');
+  assert.equal(v25.length, 84);
+  const { samples, stats } = decodeChunk([v25], { nowS: 1795700000 });
+  assert.equal(samples.length, 0);
+  assert.equal(stats.nonHR, 1);
+});
