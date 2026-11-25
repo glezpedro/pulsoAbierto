@@ -78,6 +78,7 @@ function Sidebar({ route }) {
   return html`<aside class="sidebar">
     <div class="brand"><img class="brand-logo" src="/icon.svg" alt="" /><b>Pulso</b></div>
     <div class="hide-mobile"><${SyncButton} /></div>
+    <nav class="nav nav-group"><a href="#/mas" class=${route === 'mas' ? 'active' : ''}><span class="ic" style="background:var(--accent)"><${Icon} n="grid" size=${16} /></span>Explorar</a></nav>
     ${groups.map((g) => html`<nav class="nav nav-group"><span class="label">${g}</span>
       ${visible.filter((r) => r.group === g).map((r) => html`<a href=${`#/${r.id}`} class=${route === r.id ? 'active' : ''}><span class="ic" style=${{ background: CAT[r.icon] || 'var(--accent)' }}><${Icon} n=${r.icon} size=${16} /></span>${r.title}</a>`)}
     </nav>`)}
@@ -91,11 +92,33 @@ function TabBar({ route }) {
     <span class="ic"><${Icon} n=${items[t][1]} size=${24} /></span>${items[t][0]}</a>`)}</nav>`;
 }
 
+// Explorar (como «Explorar» de Salud): categorías con sus datos y el resto de secciones.
+const CATEGORIES = [
+  { t: 'Actividad', icon: 'flame', c: 'var(--activity)', items: [['Esfuerzo', '#/m/strain'], ['Energía activa', '#/m/activeKcal'], ['Energía total', '#/m/kcal'], ['Pasos', '#/m/steps'], ['Esfuerzo y carga', '#/carga'], ['Entreno', '#/entreno']] },
+  { t: 'Corazón', icon: 'heart', c: 'var(--heart)', items: [['Frecuencia cardiaca', '#/m/hr'], ['Frecuencia cardiaca en reposo', '#/m/rhr'], ['Variabilidad de la frecuencia cardiaca', '#/m/hrv'], ['Recuperación', '#/m/recovery'], ['Medición en directo', '#/directo']] },
+  { t: 'Respiración', icon: 'lungs', c: 'var(--resp)', items: [['Frecuencia respiratoria', '#/m/resp'], ['Oxígeno en sangre (exp.)', '#/m/spo2']] },
+  { t: 'Sueño', icon: 'sleep', c: 'var(--sleep)', items: [['Sueño', '#/sueno'], ['Puntuación de sueño', '#/m/sleepScore']] },
+  { t: 'Constantes', icon: 'temp', c: 'var(--body)', items: [['Temperatura de la piel', '#/m/skinTemp'], ['Recuperación y constantes', '#/recuperacion']] },
+  { t: 'Salud mental', icon: 'mind', c: 'var(--mind)', items: [['Estrés', '#/m/avgStress'], ['Diario de hábitos', '#/diario']] },
+  { t: 'Medidas corporales', icon: 'body', c: 'var(--body)', items: [['Peso y medidas', '#/cuerpo']] },
+];
+
 function MoreView() {
+  const [q, setQ] = useState('');
+  const match = (x) => !q || x.toLowerCase().includes(q.toLowerCase());
+  const others = ROUTES.filter((r) => !TABS.includes(r.id) && !r.hidden && ['tendencias', 'semanal', 'pulsera', 'ajustes'].includes(r.id));
   return html`<div class="page">
     <div class="topbar"><h1>Explorar</h1><${StatusPill} /></div>
-    <${SyncButton} big />
-    <div class="card">${ROUTES.filter((r) => !TABS.includes(r.id) && !r.hidden).map((r) => html`
+    <input type="search" class="search" placeholder="Buscar" value=${q} onInput=${(e) => setQ(e.target.value)} />
+    <div class="section-title">Categorías de salud</div>
+    <div class="cat-grid">${CATEGORIES.filter((c) => match(c.t) || c.items.some(([t]) => match(t))).map((c) => html`
+      <details class="card cat-card" open=${!!q} style=${{ '--cat': c.c }}>
+        <summary><span class="ic" style=${{ background: c.c }}><${Icon} n=${c.icon} size=${17} /></span><span class="grow">${c.t}</span><span class="muted chev"><${Icon} n="chev" /></span></summary>
+        <div class="col" style="gap:0">${c.items.filter(([t]) => !q || match(t) || match(c.t)).map(([t, h]) => html`
+          <a class="list-item" href=${h} style="color:inherit;padding-left:42px"><span class="grow">${t}</span><span class="muted"><${Icon} n="chev" /></span></a>`)}</div>
+      </details>`)}</div>
+    <div class="section-title">Más</div>
+    <div class="card">${others.map((r) => html`
       <a class="list-item" href=${`#/${r.id}`} style="color:inherit"><span class="ic" style=${{ background: CAT[r.icon] || 'var(--accent)' }}><${Icon} n=${r.icon} size=${17} /></span><span class="grow">${r.title}</span><span class="muted"><${Icon} n="chev" /></span></a>`)}
     </div></div>`;
 }

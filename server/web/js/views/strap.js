@@ -39,6 +39,7 @@ export function StrapView() {
         </div>
         <div class="field"><label>Despertador en la pulsera (vibra aunque el móvil esté lejos)</label><${AlarmControl} /></div>
         <div class="small muted"><b>Cómo funciona la sincronización:</b> la pulsera guarda días de datos segundo a segundo. Al pulsar Sincronizar, Bluefy los descarga, los guarda primero en el móvil (para no perder nada) y después la pulsera borra solo lo confirmado. Luego se suben al servidor, que lo analiza todo. Mantén la pantalla encendida hasta que termine (1–3 min por día de datos).</div>
+        <div class="small muted"><b>«Conectado» en Ajustes del iPhone:</b> es normal que iOS muestre la WHOOP siempre conectada; mantiene el emparejamiento por su cuenta. Pulso solo habla con la pulsera mientras Bluefy está abierto, y al volver a Bluefy intenta reconectar sola.</div>
         <div class="small muted"><b>Primera vez:</b> cierra la app oficial de WHOOP (solo una app puede tener la pulsera), pulsa Conectar y acepta el emparejamiento de iOS.</div>
         <div class="small muted"><b>Si no conecta:</b> ${CONNECT_HELP}</div>
         <div class="small muted"><b>Para volver a emparejarla</b> (si se perdió el vínculo Bluetooth): ${REPAIR_HELP}</div><//>

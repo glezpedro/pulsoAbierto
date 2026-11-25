@@ -103,6 +103,24 @@ final class AnalyticsTests: XCTestCase {
               "target", r.strainTarget!)
     }
 
+    /// Going to bed before midnight: the window ends at midnight, so tonight's sleep appears truncated.
+    /// It must not be counted as a nap of today (it used to inflate naps and lower the sleep need).
+    func testEveningSleepIsNotANap() {
+        var gen = SyntheticGenerator(seed: 11)
+        let ds = day0
+        let last = SyntheticGenerator.DayPlan(bedtime: ds - 2 * 3600, wake: ds + 7 * 3600, restingHR: 52, rmssd: 70, workout: nil)
+        let tonight = SyntheticGenerator.DayPlan(bedtime: ds + 22 * 3600 + 1800, wake: ds + 31 * 3600, restingHR: 52, rmssd: 70, workout: nil)
+        let samples = gen.samples(from: ds - 6 * 3600, to: ds + 15 * 3600, plan: last)
+            + gen.samples(from: ds + 15 * 3600, to: ds + 86400, plan: tonight)
+        let rep = DayAnalyzer.analyze(samples: samples, dayKey: "d", dayStart: ds, dayEnd: ds + 86400,
+                                      profile: PhysioProfile(), history: [], now: ds + 86400)
+        XCTAssertNotNil(rep.sleep)
+        XCTAssertTrue(rep.naps.isEmpty, "naps: \(rep.naps.map { ($0.start - ds) / 60 })")
+        XCTAssertEqual(rep.metrics.napMin ?? 0, 0)
+        XCTAssertNotNil(rep.metrics.efficiency)
+        XCTAssertNotNil(rep.metrics.wakeups)
+    }
+
     func testTrainingLoad() {
         let s = TrainingLoad.summarize(dailyStrain: Array(repeating: 10, count: 21) + Array(repeating: 17, count: 7))
         XCTAssertNotNil(s.acwr)

@@ -308,6 +308,17 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.88rem; font-var
 .about summary::-webkit-details-marker { display: none; }
 .about p { margin: 0; }
 
+/* explorar */
+.search { width: 100%; background: var(--fill) !important; border: none; border-radius: 10px; padding: 9px 12px; font-size: 1rem; }
+.cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; align-items: start; }
+.cat-card:not([open]) > div { display: none; }
+.card.cat-card { padding: 0 14px; gap: 0; }
+.cat-card summary { display: flex; gap: 12px; align-items: center; padding: 11px 0; cursor: pointer; list-style: none; font-weight: 600; color: var(--cat); }
+.cat-card summary::-webkit-details-marker { display: none; }
+.cat-card summary .ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #fff; flex: none; }
+.cat-card[open] summary .chev { transform: rotate(90deg); }
+.cat-card .chev { transition: transform .2s; display: inline-flex; }
+
 /* detalle de métrica */
 .h1-detail { font-size: 1.75rem; margin-top: 4px; line-height: 1.15; }
 .metric-about { font-size: 0.92rem; line-height: 1.45; }
@@ -350,5 +361,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.88rem; font-var
   .stage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bh-value { font-size: 2.1rem; }
   .hl-grid { grid-template-columns: 1fr; }
+  .cat-grid { grid-template-columns: 1fr; gap: 8px; }
   .tn-big { font-size: 2.5rem; }
 }

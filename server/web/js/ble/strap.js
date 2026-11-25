@@ -103,10 +103,14 @@ class Strap extends EventTarget {
 
   /** Silent reconnect when the page opens (only where the browser implements getDevices()). */
   async autoConnect() {
-    if (!navigator.bluetooth?.getDevices || this.connected || this.s.conn !== 'idle') return false;
+    if (!navigator.bluetooth || this.connected || this.s.conn !== 'idle') return false;
     try {
-      const id = localStorage.getItem('pulso.deviceId');
-      const device = (await navigator.bluetooth.getDevices()).find((d) => d.id === id);
+      // same page session (back from the background): the device object is still valid
+      let device = this.device || null;
+      if (!device && navigator.bluetooth.getDevices) {
+        const id = localStorage.getItem('pulso.deviceId');
+        device = (await navigator.bluetooth.getDevices()).find((d) => d.id === id) || null;
+      }
       if (!device) return false;
       await this.openWithTimeout(device);
       return true;
@@ -271,7 +275,7 @@ class Strap extends EventTarget {
       clock: shown != null ? new Date(shown * 1000) : null, clockOk: ok, clockBefore: strapBefore,
       clockDrift: shown != null ? Math.round(shown - ref) : null, clockRaw: rawBody ? hex(rawBody.body) : null,
     });
-    if (!ok) this.log('No se pudo comprobar la hora de la pulsera. Se descarga igualmente, pero los registros con fecha imposible NO se confirman (se quedan en la pulsera y en crudo).', 'error');
+    if (!ok) this.log(`No se pudo comprobar la hora de la pulsera (bytes ${rawBody ? hex(rawBody.body) : 'sin respuesta'}). No se confirmará ningún bloque hasta que la hora cuadre: los datos se quedan en la pulsera y se guardan en crudo.`, 'error');
     return ok;
   }
 
@@ -522,6 +526,13 @@ class Strap extends EventTarget {
       try { const res = await uploadChunk(rec); if (res.rawSaved) await queue.markUploaded(id, res); } catch { /* stays pending on the phone */ }
       return this.stopHistory('Ha llegado un bloque sin registros válidos. NO se ha confirmado: sigue en la pulsera y guardado en crudo para analizarlo (Pulsera › Diagnóstico).');
     }
+    // 2b) strap clock not verified → the dates may be wrong but look plausible: keep everything raw
+    //     (phone + server) and acknowledge nothing, so no record is freed with a wrong date.
+    if (this.s.clockOk === false) {
+      const rawOnly = { ...rec, samples: new Uint8Array(0) };
+      try { const res = await uploadChunk(rawOnly); if (res.rawSaved) await queue.markUploaded(id, { ...res, rawOnly: true }); } catch { /* stays pending on the phone */ }
+      return this.stopHistory('No se ha podido verificar la hora de la pulsera, así que no se confirma ningún bloque (sus fechas podrían ser falsas). Los datos siguen en la pulsera y el primer bloque queda guardado en crudo. Vuelve a conectar; si se repite, descarga el registro en Diagnóstico.');
+    }
     if (stats.tooOld || stats.future) this.log(`En el bloque hay ${stats.tooOld + stats.future} registros con fecha imposible (${stats.tooOld} antiguos, ${stats.future} futuros): no se guardan como datos, pero quedan en crudo.`, 'warn');
 
     // 3) server: raw chunk + records
@@ -670,8 +681,15 @@ export const strap = new Strap();
 // Al salir de la página se suelta la conexión para que la próxima visita pueda conectar sin bloqueo.
 window.addEventListener('pagehide', () => { if (strap.device?.gatt?.connected) { try { strap.device.gatt.disconnect(); } catch { /* ignore */ } } });
 // Al volver a la app: si el enlace murió mientras estaba en segundo plano, reflejarlo.
+// y volver a conectar sola (una vez por regreso, sin abrir la lista) para descargar lo nuevo.
+let lastAutoTry = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && strap.device && !strap.device.gatt?.connected && strap.connected) strap.onDisconnect();
+  if (document.visibilityState !== 'visible') return;
+  if (strap.device && !strap.device.gatt?.connected && strap.connected) strap.onDisconnect();
+  if (!strap.connected && strap.s.conn === 'idle' && Date.now() - lastAutoTry > 20000) {
+    lastAutoTry = Date.now();
+    setTimeout(() => strap.autoConnect().catch(() => {}), 700);
+  }
 });
 // Vigilante: ningún estado de conexión puede quedarse colgado más de 100 s.
 let stuckSince = 0;
