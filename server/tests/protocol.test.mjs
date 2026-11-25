@@ -177,3 +177,16 @@ test('v25 records (84 bytes) carry no heart rate and are not stored as samples',
   assert.equal(samples.length, 0);
   assert.equal(stats.nonHR, 1);
 });
+
+test('weekly alarm: next occurrence on the chosen weekdays', async () => {
+  const { nextAlarm } = await import('../web/js/alarmcalc.js');
+  const wed2200 = new Date(2026, 10, 25, 22, 0, 0);          // miércoles 25 nov 2026, 22:00
+  const weekdays = { time: '07:00', days: [1, 2, 3, 4, 5] };
+  assert.equal(nextAlarm(weekdays, wed2200).toString(), new Date(2026, 10, 26, 7, 0, 0).toString());   // jueves 07:00
+  const fri2200 = new Date(2026, 10, 27, 22, 0, 0);
+  assert.equal(nextAlarm(weekdays, fri2200).toString(), new Date(2026, 10, 30, 7, 0, 0).toString());   // lunes 07:00
+  const sameDayEarly = new Date(2026, 10, 25, 6, 0, 0);
+  assert.equal(nextAlarm(weekdays, sameDayEarly).toString(), new Date(2026, 10, 25, 7, 0, 0).toString());
+  assert.equal(nextAlarm({ time: '07:00', days: [] }, wed2200), null);
+  assert.equal(nextAlarm({ time: 'xx', days: [1] }, wed2200), null);
+});

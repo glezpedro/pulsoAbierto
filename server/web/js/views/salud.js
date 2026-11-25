@@ -1,7 +1,7 @@
 // Salud: Resumen (cada dato con su tendencia), Explorar (categorías), Tendencias (30 días frente a los
 // 30 anteriores) y Constantes (las de la noche frente a tu rango habitual).
 import { html, useState } from '../../vendor/preact-htm.js';
-import { useApi, useStore, store, n, hm, hhmm, mean, sd, C, addDays } from '../core.js';
+import { useApi, useStore, store, n, hm, hhmm, mean, sd, C, addDays, isToday } from '../core.js';
 import { Spinner, Card } from '../ui.js';
 import { Icon } from '../icons.js';
 import { SyncProgress } from '../layout.js';
@@ -69,6 +69,8 @@ function Resumen() {
   const rhrs = list.map((d) => d.rhr).filter((x) => x != null);
   const vo2 = status?.hrMax && rhrs.length ? 15.3 * (status.hrMax / mean(rhrs.slice(-7))) : null;
   const naps = day.data?.report?.naps || [];
+  // today's totals are partial: comparing them with whole days would always point down
+  const partial = (k) => isToday(date) && (k === 'strain' || k === 'activeKcal');
   return html`<div class="grid">
     <section class="card span-7 rows-card">
       ${ROWS.filter(([k]) => k !== 'skinTemp' || today.skinTemp != null).map(([k, t, s, u, dec, better, icon, color, href]) => {
@@ -77,7 +79,7 @@ function Resumen() {
           <span class="mr-ic"><${Icon} n=${icon} size=${18} /></span>
           <span class="col grow" style="gap:0"><span>${t}</span><span class="tiny muted">${s}</span></span>
           <span class="mr-v num">${k === 'sleptMin' ? (cur != null ? hm(cur) : '–') : html`${n(cur, dec)}${u && cur != null && html`<small> ${u}</small>`}`}</span>
-          <${Trend} cur=${cur} base=${base} better=${better} dec=${dec} />
+          ${partial(k) ? html`<span class="trend muted" title="El día aún no ha terminado">·</span>` : html`<${Trend} cur=${cur} base=${base} better=${better} dec=${dec} />`}
         </a>`;
       })}
       ${vo2 && html`<div class="mrow" style="--cat:var(--green)">

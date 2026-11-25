@@ -12,6 +12,7 @@ services:
       - "127.0.0.1:8090:8090"
     environment:
       - TZ=Europe/Madrid
+      # Tu dirección de Tailscale (la que muestra `tailscale serve status`)
       - PULSO_PUBLIC_URL=https://tu-servidor.tu-tailnet.ts.net
       # Opcional: restringir a tu usuario de Tailscale (cabecera que añade `tailscale serve`)
       # - PULSO_ALLOWED_LOGINS=tu-usuario@ejemplo.com

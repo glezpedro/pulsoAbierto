@@ -5,7 +5,7 @@ import { Icon } from './icons.js';
 import { strap, CONN } from './ble/strap.js';
 import { SyncButton, StatusPill } from './layout.js';
 
-import { TodayView, TodayDetail } from './views/today.js';
+import { TodayDetail } from './views/today.js';
 import { HomeView } from './views/home.js';
 import { SaludView, ExploreList } from './views/salud.js';
 import { EntrenoView, SessionView } from './views/entreno.js';

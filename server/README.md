@@ -5,14 +5,14 @@ Versión web de Pulso para usar la WHOOP 4.0 **sin firmar ni instalar apps**:
 - **En el iPhone**, se abre en **Bluefy** (navegador con Bluetooth). Conecta con la pulsera, descarga el historial y lo sube a tu servidor.
 - **En el ordenador**, cualquier navegador muestra todo en pantalla grande.
 - **Tu servidor** guarda los datos, calcula las métricas, genera los informes y envía las notificaciones por Telegram.
-- Solo es accesible dentro de tu red de Tailscale, por HTTPS: `https://tu-servidor.tu-tailnet.ts.net`.
+- Solo es accesible dentro de tu red de Tailscale, por HTTPS: `https://tu-servidor.tu-tailnet.ts.net` (tu nombre de MagicDNS).
 
 ## Instalación (una vez)
 
 En el servidor, desde la carpeta del proyecto:
 
 ```bash
-cd ~/pulso
+cd ~/pulso      # la carpeta donde clonaste el repositorio
 sudo bash server/install.sh
 ```
 
@@ -26,7 +26,7 @@ El script hace todo esto:
 
 ## Primer uso
 
-1. En el iPhone: activa Tailscale, abre **Bluefy** y entra en `https://tu-servidor.tu-tailnet.ts.net`.
+1. En el iPhone: activa Tailscale, abre **Bluefy** y entra en `https://tu-servidor.tu-tailnet.ts.net` (tu nombre de MagicDNS).
    - Si quieres tenerla a mano, añádela a favoritos de Bluefy.
 2. **Ajustes** → completa tu perfil.
    - Si no tienes la pulsera todavía, pulsa *Generar 3 semanas de datos demo*.

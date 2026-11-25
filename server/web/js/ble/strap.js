@@ -11,6 +11,7 @@
 import { UUID, TYPE, CMD, EVENTS, FrameAssembler, buildFrame, parse, decodeChunk, encodeSamples, payload, read, parseHeartRate,
   hex, u32, packFrames, splitFrames, describeFrame, logText, TS_MIN, NON_HR_VERSIONS, fixTimestamp } from './protocol.js';
 import { queue, flush, uploadChunk } from './queue.js';
+import { nextAlarm } from '../alarmcalc.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const withTimeout = (p, ms, msg) => new Promise((resolve, reject) => {
@@ -785,16 +786,7 @@ class Strap extends EventTarget {
   releaseWake() { try { this.wakeLock?.release(); } catch { /* ignore */ } this.wakeLock = null; }
 }
 
-/** Next occurrence of a weekly schedule after `from` (Date), or null. */
-export function nextAlarm(sch, from = new Date()) {
-  const [h, m] = String(sch.time).split(':').map(Number);
-  for (let i = 0; i < 8; i++) {
-    const d = new Date(from); d.setDate(d.getDate() + i); d.setHours(h, m, 0, 0);
-    const wd = ((d.getDay() + 6) % 7) + 1;          // 1 = lunes … 7 = domingo
-    if (d > from && sch.days.includes(wd)) return d;
-  }
-  return null;
-}
+export { nextAlarm };
 
 export const strap = new Strap();
 

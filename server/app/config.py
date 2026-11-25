@@ -13,7 +13,8 @@ ENGINE = os.environ.get("PULSO_ENGINE", "/usr/local/bin/pulso-engine")
 WEB_DIR = Path(os.environ.get("PULSO_WEB", str(Path(__file__).resolve().parent.parent / "web")))
 TZ_NAME = os.environ.get("TZ", "Europe/Madrid")
 TZ = ZoneInfo(TZ_NAME)
-PUBLIC_URL = os.environ.get("PULSO_PUBLIC_URL", "https://tu-servidor.tu-tailnet.ts.net").rstrip("/")
+# Public HTTPS address of the web (e.g. https://mi-servidor.mi-tailnet.ts.net): base of the Strava OAuth callback
+PUBLIC_URL = os.environ.get("PULSO_PUBLIC_URL", "http://localhost:8090").rstrip("/")
 # Optional: comma-separated Tailscale logins allowed (uses the Tailscale-User-Login header added by `tailscale serve`)
 ALLOWED_LOGINS = [x.strip().lower() for x in os.environ.get("PULSO_ALLOWED_LOGINS", "").split(",") if x.strip()]
 # Optional secrets via env (can also be set from the web UI)
