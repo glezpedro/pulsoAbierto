@@ -127,7 +127,7 @@ export function parse(b) {
       return { kind: 'response', cmd: b[6], seq: b[7], result: b[8], body: b.slice(9, len) };
     case TYPE.event: {
       const e = { kind: 'event', code: b[6], ts: u32(b, 8) };
-      if (b[6] === 3 && len >= 19) { e.battery = u16(b, 17) / 10; e.mv = u16(b, 21); e.charging = ((b[26] ?? 0) & 1) === 1; }
+      if (b[6] === 3 && len >= 19) { e.battery = u16(b, 17) / 10; e.mv = u16(b, 21); e.charging = ((b[26] ?? 0) & 1) === 1; e.raw = hex(b); }
       return e;
     }
     case TYPE.metadata: case TYPE.puffinMeta: {
@@ -148,9 +148,11 @@ export function parse(b) {
 }
 
 // ---------------------------------------------------------------- history records
+// The timestamp is returned as the strap wrote it, even when it is not plausible (clock lost → 1970,
+// clock never set, future): decodeChunk decides what to do with it and leaves a trace of every discard.
 function decodeV24(b) {
   const ts = u32(b, 11);
-  if (!ts || ts < 1e9) return null;
+  if (ts == null) return null;
   const hr = b[21] ?? 0, n = Math.min(b[22] ?? 0, 4), rr = [];
   for (let i = 0; i < n; i++) { const v = u16(b, 23 + 2 * i); if (v >= 250 && v <= 2500) rr.push(v); }
   let g = null;
@@ -161,7 +163,7 @@ function decodeV24(b) {
 
 function decodeGeneric(b, tsOff, hrOff) {
   const ts = u32(b, tsOff);
-  if (!ts || ts < 1e9) return null;
+  if (ts == null) return null;
   let hr = 0; const rr = [];
   if (hrOff != null) {
     hr = b[hrOff] ?? 0;
@@ -216,21 +218,69 @@ export function detectLayout(frames) {
   return { tsOffset, hrOffset: conf > 0.35 ? best : null, confidence: conf };
 }
 
-export function decodeChunk(frames) {
+// ---------------------------------------------------------------- timestamps
+/** Oldest timestamp accepted as real (2017-07-14). Older = the strap clock was never set or was lost. */
+export const TS_MIN = 1.5e9;
+/** Records more than this many seconds in the future are rejected. */
+export const TS_FUTURE = 600;
+
+/** Clock fixes measured when connecting: if the strap clock was wrong, `{ strapAt, offset }` says that at
+ *  strap time `strapAt` the real time was `strapAt + offset`. Records written with that wrong clock (strap
+ *  time within the 30 days before `strapAt`) are shifted by `offset`. Returns { ts, fixed }. */
+export function fixTimestamp(ts, fixes = []) {
+  for (const f of fixes || []) {
+    if (!f || !Number.isFinite(f.offset) || Math.abs(f.offset) < 300) continue;
+    if (ts <= f.strapAt + 120 && ts >= f.strapAt - 30 * 86400) return { ts: ts + f.offset, fixed: true };
+  }
+  return { ts, fixed: false };
+}
+
+/** Decodes the history frames of one chunk. Only records with a plausible timestamp (after applying the
+ *  clock fixes) are returned in `samples`; `stats` counts everything else so nothing disappears silently. */
+export function decodeChunk(frames, { fixes = [], nowS = Date.now() / 1000 } = {}) {
   const groups = new Map();
   for (const f of frames) { if (!groups.has(f.length)) groups.set(f.length, []); groups.get(f.length).push(f); }
-  const out = [], notes = [];
+  const decoded = [], notes = [];
   for (const [size, list] of groups) {
-    if (size === 96) { list.forEach((f) => { const s = decodeV24(f); if (s) out.push(s); }); notes.push(`v24×${list.length}`); }
+    if (size === 96) { list.forEach((f) => { const s = decodeV24(f); if (s) decoded.push(s); }); notes.push(`v24×${list.length}`); }
     else {
       const d = detectLayout(list);
-      list.forEach((f) => { const s = decodeGeneric(f, d.tsOffset, d.hrOffset); if (s) out.push(s); });
+      list.forEach((f) => { const s = decodeGeneric(f, d.tsOffset, d.hrOffset); if (s) decoded.push(s); });
       notes.push(`len${size}×${list.length} hr@${d.hrOffset ?? '?'} conf ${d.confidence.toFixed(2)}`);
     }
   }
+  const stats = { frames: frames.length, decoded: decoded.length, valid: 0, fixed: 0, tooOld: 0, future: 0,
+    rawFirst: null, rawLast: null, first: null, last: null, sizes: [...groups.keys()] };
+  const out = [];
+  for (const s of decoded) {
+    stats.rawFirst = stats.rawFirst == null ? s.ts : Math.min(stats.rawFirst, s.ts);
+    stats.rawLast = stats.rawLast == null ? s.ts : Math.max(stats.rawLast, s.ts);
+    const { ts, fixed } = fixTimestamp(s.ts, fixes);
+    if (ts < TS_MIN) { stats.tooOld++; continue; }
+    if (ts > nowS + TS_FUTURE) { stats.future++; continue; }
+    if (fixed) stats.fixed++;
+    out.push({ ...s, ts, rawTs: s.ts });
+  }
   out.sort((a, b) => a.ts - b.ts);
-  return { samples: out, note: notes.join(', ') };
+  stats.valid = out.length;
+  if (out.length) { stats.first = out[0].ts; stats.last = out[out.length - 1].ts; }
+  if (stats.fixed) notes.push(`hora corregida ×${stats.fixed}`);
+  return { samples: out, note: notes.join(', '), stats };
 }
+
+// ---------------------------------------------------------------- raw chunks
+/** Frames are self-delimiting (0xAA + length + CRC), so a raw chunk is just their concatenation. */
+export function packFrames(frames) {
+  const total = frames.reduce((a, f) => a + f.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const f of frames) { out.set(f, o); o += f.length; }
+  return out;
+}
+export function splitFrames(bytes) { return new FrameAssembler().push(bytes); }
+
+/** Short description of a frame for the diagnostic log: type, length and the first bytes. */
+export function describeFrame(f, n = 32) { return `tipo ${f[4]} · ${f.length} B · ${hex(f.slice(0, n))}`; }
 
 /** Same 32-byte record the server/iOS store use. */
 export function encodeSamples(samples) {
@@ -274,7 +324,12 @@ export const read = {
   },
   /** GET_ALARM reply: the body layout is undocumented, so look for a plausible upcoming unix time. */
   alarm: (r) => { const now = Date.now() / 1000; for (let o = 0; o <= r.body.length - 4; o++) { const v = u32(r.body, o); if (v > now - 3600 && v < now + 8 * 86400) return new Date(v * 1000); } return null; },
-  clock: (r) => { const now = Date.now() / 1000; for (let o = 0; o < Math.min(6, r.body.length - 3); o++) { const v = u32(r.body, o); if (v > 1.5e9 && Math.abs(v - now) < 5 * 365 * 86400) return new Date(v * 1000); } return null; },
+  /** GET_CLOCK reply layout is undocumented: every u32 of the first bytes is a candidate. The real offset
+   *  is learnt after SET_CLOCK (the candidate that then matches the phone time). */
+  clockCandidates: (r) => { const out = []; for (let o = 0; o + 4 <= Math.min(r.body.length, 12); o++) out.push({ o, v: u32(r.body, o) }); return out; },
+  clockAt: (r, o) => (o != null && o + 4 <= r.body.length ? u32(r.body, o) : null),
+  /** Offset of the candidate within `tol` seconds of `nowS`, or null. */
+  clockOffsetNear: (r, nowS, tol = 120) => { let best = null; for (const c of read.clockCandidates(r)) { const d = Math.abs(c.v - nowS); if (d <= tol && (!best || d < best.d)) best = { o: c.o, d }; } return best ? best.o : null; },
 };
 
 /** Standard BLE Heart Rate Measurement (0x2A37). R-R returned in ms. */

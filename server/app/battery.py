@@ -20,9 +20,11 @@ db.ex("""CREATE TABLE IF NOT EXISTS battery (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, level REAL NOT NULL, charging INTEGER NOT NULL DEFAULT 0,
   mv INTEGER, source TEXT)""")
 db.ex("CREATE INDEX IF NOT EXISTS battery_ts ON battery(ts)")
+if "raw" not in [r["name"] for r in db.q("PRAGMA table_info(battery)")]:
+    db.ex("ALTER TABLE battery ADD COLUMN raw TEXT")     # hex of the strap event, to decode it better later
 
 
-def record(level, charging, mv=None, source="bluefy", ts=None) -> bool:
+def record(level, charging, mv=None, source="bluefy", ts=None, raw=None) -> bool:
     """Stores a reading. Skips exact repeats within 10 minutes. Returns True if stored."""
     if level is None:
         return False
@@ -31,13 +33,142 @@ def record(level, charging, mv=None, source="bluefy", ts=None) -> bool:
     last = db.one("SELECT ts, level, charging FROM battery ORDER BY ts DESC LIMIT 1")
     if last and abs(last["level"] - level) < 0.05 and bool(last["charging"]) == bool(charging) and ts - last["ts"] < 600:
         return False
-    db.ex("INSERT INTO battery(ts, level, charging, mv, source) VALUES(?,?,?,?,?)",
-          (ts, level, 1 if charging else 0, int(mv) if mv else None, source))
+    db.ex("INSERT INTO battery(ts, level, charging, mv, source, raw) VALUES(?,?,?,?,?,?)",
+          (ts, level, 1 if charging else 0, int(mv) if mv else None, source, raw))
     return True
 
 
+# Open-circuit voltage → state of charge for a single Li-ion/LiPo cell at rest (mV, %). The strap's own
+# percentage is unreliable after a reset (it was seen dropping 90 % → 15 % in minutes and showing 3.83 V
+# as ~35 %), so whenever the voltage is known the level is derived from it.
+OCV = [(3300, 0), (3600, 3), (3690, 8), (3730, 15), (3760, 22), (3790, 32), (3810, 40), (3830, 48), (3850, 55),
+       (3870, 60), (3910, 66), (3950, 72), (3980, 77), (4020, 82), (4060, 87), (4100, 92), (4150, 96), (4190, 100)]
+CHARGE_SURFACE_MIN = 30        # minutes after unplugging during which the voltage is still inflated
+MAX_JUMP = 4.0                 # % accepted between two close readings regardless of time (sensor noise)
+MAX_DISCHARGE_H = 6.0          # %/h faster than this while discharging is not physically plausible
+
+
+def ocv_level(mv) -> float | None:
+    """State of charge (%) from the resting voltage, linear between the points of the OCV curve."""
+    if not mv or mv < 2500 or mv > 4500:
+        return None
+    if mv <= OCV[0][0]:
+        return 0.0
+    for (v0, p0), (v1, p1) in zip(OCV, OCV[1:]):
+        if mv <= v1:
+            return round(p0 + (p1 - p0) * (mv - v0) / (v1 - v0), 1)
+    return 100.0
+
+
+PACK_WINDOW = 180              # s: a non-charging reading this close to charging readings comes from the pack
+GAUGE_TRUST = 10.0             # % of disagreement with the resting-voltage curve beyond which the strap gauge is ignored
+
+
+def _pack_flags(rows: list[dict]) -> list[bool]:
+    """While the battery pack is charging the strap, the strap sends readings of BOTH batteries,
+    interleaved: its own (charging) and the pack's (not charging, falling fast). That mix is what made
+    the chart jump 90 % → 15 % in minutes and show 3.83 V as ~35 %. A non-charging reading with charging
+    readings on both sides within PACK_WINDOW s (or right after one, with a clearly different voltage)
+    is the pack's."""
+    ch_ts = [r["ts"] for r in rows if r["charging"]]
+    flags = []
+    import bisect
+    for r in rows:
+        if r["charging"] or not ch_ts:
+            flags.append(False)
+            continue
+        i = bisect.bisect_left(ch_ts, r["ts"])
+        before = ch_ts[i - 1] if i > 0 else None
+        after = ch_ts[i] if i < len(ch_ts) else None
+        near_b = before is not None and r["ts"] - before <= PACK_WINDOW
+        near_a = after is not None and after - r["ts"] <= PACK_WINDOW
+        flags.append(near_b and near_a)
+    # trailing pack readings (charging just stopped being reported): same voltage family as the pack run
+    for i, r in enumerate(rows):
+        if flags[i] or r["charging"] or not r.get("mv"):
+            continue
+        j = i - 1
+        while j >= 0 and rows[j]["ts"] >= r["ts"] - PACK_WINDOW and not flags[j]:
+            j -= 1
+        if j >= 0 and flags[j] and rows[j]["ts"] >= r["ts"] - PACK_WINDOW and rows[j].get("mv") and abs(rows[j]["mv"] - r["mv"]) <= 40:
+            flags[i] = True
+    return flags
+
+
+def _incoherent(r: dict, prev: dict | None) -> bool:
+    """A voltage that cannot follow the previous strap reading: plugging in the charger always raises the
+    voltage, and without a charger it can't rise much or collapse within a couple of minutes."""
+    if not prev or not r.get("mv") or not prev.get("mv"):
+        return False
+    dv, dt = r["mv"] - prev["mv"], r["ts"] - prev["ts"]
+    ch, pch = bool(r["charging"]), bool(prev["charging"])
+    if ch and not pch and dt < 600 and dv < -50:
+        return True                                  # "started charging" but the voltage fell
+    if not ch and not pch and dt < 600 and dv > 150:
+        return True                                  # big rise without a charger
+    if ch == pch and dt < 120 and dv < -250:
+        return True                                  # collapse in seconds
+    return False
+
+
+def derive(rows: list[dict]) -> list[dict]:
+    """Coherent strap levels for chronological readings. Each row keeps the strap's raw value in
+    `reported`, gets `level` (best estimate) and the flags `pack` (reading of the battery pack, not the
+    strap) and `outlier` (incoherent voltage). For strap readings:
+      · the strap's own gauge is used while it agrees (±GAUGE_TRUST) with the resting-voltage curve;
+      · when it does not, or there is no gauge value, the voltage curve wins (not while charging: the
+        charger raises the voltage, so there the curve is only an upper bound);
+      · a discharge faster than MAX_DISCHARGE_H %/h (beyond sensor noise) is clamped."""
+    rows = [dict(r) for r in rows]
+    packs = _pack_flags(rows)
+    out, last, prev_raw = [], None, None
+    for r, is_pack in zip(rows, packs):
+        rep = float(r["level"])
+        r["reported"] = rep
+        r["pack"] = is_pack
+        r["outlier"] = False
+        if is_pack:
+            r["level"] = rep
+            out.append(r)
+            continue
+        if _incoherent(r, prev_raw):
+            r["outlier"] = True
+            r["level"] = last["level"] if last else rep
+            out.append(r)
+            continue
+        prev_raw = r
+        mv, ch = r.get("mv"), bool(r["charging"])
+        v = ocv_level(mv) if r.get("source") != "demo" else None
+        if v is None:
+            lvl = rep
+        elif ch:
+            lvl = min(rep, v)                         # gauge, never above what the (inflated) voltage allows
+        else:
+            lvl = rep if abs(rep - v) <= GAUGE_TRUST else v
+            if last and not last["charging"]:
+                dt_h = max(0.0, (r["ts"] - last["ts"]) / 3600)
+                lo = last["level"] - MAX_JUMP - MAX_DISCHARGE_H * dt_h
+                hi = last["level"] + MAX_JUMP if dt_h < 1 else 100.0   # a big rise needs a charge (or a gap)
+                lvl = min(max(lvl, lo), hi)
+        r["level"] = round(max(0.0, min(100.0, lvl)), 1)
+        out.append(r)
+        last = r
+    return out
+
+
+def pack_level(days: int = 2) -> dict | None:
+    """Last reading of the battery pack, if any was seen recently."""
+    rows = [dict(r) for r in db.q("SELECT ts, level, charging, mv, source FROM battery WHERE ts > ? ORDER BY ts", (now() - days * 86400,))]
+    packs = [r for r, f in zip(derive(rows), _pack_flags(rows)) if f]
+    if not packs:
+        return None
+    p = packs[-1]
+    return {"ts": p["ts"], "level": p["reported"], "mv": p.get("mv")}
+
+
 def readings(days: int = 30) -> list[dict]:
-    return [dict(r) for r in db.q("SELECT ts, level, charging, mv FROM battery WHERE ts > ? ORDER BY ts", (now() - days * 86400,))]
+    rows = [dict(r) for r in db.q("SELECT ts, level, charging, mv, source FROM battery WHERE ts > ? ORDER BY ts", (now() - days * 86400,))]
+    return [r for r in derive(rows) if not r["outlier"] and not r["pack"]]
 
 
 def _segments(rs: list[dict], charging: bool) -> list[list[dict]]:
@@ -120,7 +251,7 @@ def estimate() -> dict:
         est = max(0.0, last["level"] - rate * age_h)
 
     out = {
-        "known": True, "level": last["level"], "estimated": round(est, 1), "charging": charging, "mv": last.get("mv"),
+        "known": True, "level": last["level"], "pack": pack_level(), "estimated": round(est, 1), "charging": charging, "mv": last.get("mv"),
         "lastReading": last["ts"], "readingAgeH": round(age_h, 2),
         "dischargePerHour": round(rate, 3), "dischargePerDay": round(rate * 24, 1), "dischargeSource": rate_src,
         "chargePerHour": round(c_rate, 1), "chargeSource": "medida" if crates else "nominal",

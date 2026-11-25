@@ -4,6 +4,7 @@ import { Card, Tile, Stat, Ring, ChartBox, timeX, ZoneBar, Md, Empty, Spinner, H
 import { Page, SyncButton, SyncProgress } from '../layout.js';
 import { SendToHealth } from './health.js';
 import { AlarmSummary } from './alarm.js';
+import { STAGES } from '../core.js';
 import { Icon } from '../icons.js';
 
 export function DayNav() {
@@ -292,28 +293,29 @@ function HealthSummary({ onDetail }) {
 
       <div class="section-title">Favoritos</div>
       <div class="hk-list">
-        <${HKCard} cat="var(--green)" icon="heart" title="Recuperación" when=${rep.sleep ? hhmm(rep.sleep.end) : 'Hoy'} href="#/recuperacion"
+        <${HKCard} cat="var(--green)" icon="heart" title="Recuperación" when=${rep.sleep ? hhmm(rep.sleep.end) : 'Hoy'} href="#/m/recovery"
           value=${m.recovery != null ? n(m.recovery) : '–'} unit="%" label=${m.recovery == null ? 'Sin sueño analizado' : m.recovery >= 67 ? 'Lista para rendir' : m.recovery >= 34 ? 'Mantén la carga' : 'Prioriza recuperar'} spark=${sp('recovery')} />
         <${HKCard} cat="var(--sleep)" icon="sleep" title="Sueño" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/sueno"
-          value=${m.sleptMin != null ? hmShortTxt(m.sleptMin) : '–'} label=${m.sleepNeedMin ? `Dormido · necesidad ${hm(m.sleepNeedMin)} · puntuación ${n(m.sleepScore)}` : ''} spark=${sp(null, (x) => x.sleptMin)} />
-        <${HKCard} cat="var(--activity)" icon="bolt" title="Esfuerzo" when="Hoy" href="#/carga"
+          value=${m.sleptMin != null ? hmShortTxt(m.sleptMin) : '–'} label=${m.sleepNeedMin ? `Dormido · necesidad ${hm(m.sleepNeedMin)} · puntuación ${n(m.sleepScore)}` : ''} spark=${rep.sleep ? null : sp(null, (x) => x.sleptMin)}>
+          ${rep.sleep && html`<${MiniStages} s=${rep.sleep} />`}<//>
+        <${HKCard} cat="var(--activity)" icon="bolt" title="Esfuerzo" when="Hoy" href="#/m/strain"
           value=${n(m.strain, 1)} label=${rep.targetLo != null && isToday(date) ? `Objetivo ${n(rep.targetLo)}–${n(rep.targetHi)}` : 'de 21'} spark=${sp('strain')} />
-        <${HKCard} cat="var(--heart)" icon="heart" title="Frecuencia cardiaca en reposo" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/recuperacion"
+        <${HKCard} cat="var(--heart)" icon="heart" title="Frecuencia cardiaca en reposo" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/m/rhr"
           value=${n(m.rhr)} unit="lpm" spark=${sp('rhr')} />
-        <${HKCard} cat="var(--heart)" icon="wave" title="Variabilidad de la frecuencia cardiaca" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/recuperacion"
+        <${HKCard} cat="var(--heart)" icon="wave" title="Variabilidad de la frecuencia cardiaca" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/m/hrv"
           value=${n(m.hrv)} unit="ms" label="RMSSD durante el sueño" spark=${sp('hrv')} />
-        <${HKCard} cat="var(--heart)" icon="heart" title="Frecuencia cardiaca" when="Hoy" onClick=${onDetail}
+        <${HKCard} cat="var(--heart)" icon="heart" title="Frecuencia cardiaca" when="Hoy" href="#/m/hr"
           value=${`${n(m.avgHR)}`} unit="lpm de media" label=${`Máx ${n(m.maxHR)} lpm · mín sueño ${n(rep.sleep?.minHR)} lpm`} spark=${rep.hrTimeline.slice(-24).map((b) => b.avg)} />
-        <${HKCard} cat="var(--resp)" icon="lungs" title="Frecuencia respiratoria" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/sueno"
+        <${HKCard} cat="var(--resp)" icon="lungs" title="Frecuencia respiratoria" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/m/resp"
           value=${n(m.resp, 1)} unit="rpm" label="Durante el sueño" spark=${sp('resp')} />
-        <${HKCard} cat="var(--activity)" icon="flame" title="Energía activa" when="Hoy" href="#/carga"
+        <${HKCard} cat="var(--activity)" icon="flame" title="Energía activa" when="Hoy" href="#/m/activeKcal"
           value=${n(m.activeKcal)} unit="kcal" label=${`${n(m.kcal)} kcal en total`} spark=${sp('activeKcal')} />
-        ${m.steps != null && html`<${HKCard} cat="var(--activity)" icon="walk" title="Pasos" when="Hoy" value=${n(m.steps)} unit="pasos" spark=${sp('steps')} />`}
-        <${HKCard} cat="var(--mind)" icon="mind" title="Estrés" when="Hoy" onClick=${onDetail}
+        ${m.steps != null && html`<${HKCard} cat="var(--activity)" icon="walk" title="Pasos" when="Hoy" href="#/m/steps" value=${n(m.steps)} unit="pasos" spark=${sp('steps')} />`}
+        <${HKCard} cat="var(--mind)" icon="mind" title="Estrés" when="Hoy" href="#/m/avgStress"
           value=${n(m.avgStress, 1)} unit="de 3" label=${m.highStressMin ? `${hm(m.highStressMin)} en estrés alto` : 'Sin estrés alto'} spark=${sp('avgStress')} />
-        ${temp != null && html`<${HKCard} cat="var(--body)" icon="temp" title="Temperatura de la piel" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/tendencias"
+        ${temp != null && html`<${HKCard} cat="var(--body)" icon="temp" title="Temperatura de la piel" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/m/skinTemp"
           value=${`${temp > 0 ? '+' : ''}${n(temp, 1)}`} unit="σ" label="Respecto a tu media" />`}
-        ${status?.settings?.showSpO2 && m.spo2 != null && html`<${HKCard} cat="var(--red)" icon="drop" title="Oxígeno en sangre (exp.)" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} value=${n(m.spo2)} unit="%" spark=${sp('spo2')} />`}
+        ${status?.settings?.showSpO2 && m.spo2 != null && html`<${HKCard} cat="var(--red)" icon="drop" title="Oxígeno en sangre (exp.)" when=${rep.sleep ? hhmm(rep.sleep.end) : '–'} href="#/m/spo2" value=${n(m.spo2)} unit="%" spark=${sp('spo2')} />`}
         ${plan.data?.adapted && html`<${HKCard} cat="var(--activity)" icon="dumbbell" title="Entreno de hoy" when=${`S${plan.data.week}`} href="#/entreno"
           value=${plan.data.adapted.title} label=${plan.data.note} />`}
         ${bat?.known && html`<${HKCard} cat="var(--green)" icon="battery" title="Batería de la pulsera" when=${bat.charging ? 'Cargando' : 'Ahora'} href="#/pulsera"
@@ -326,3 +328,18 @@ function HealthSummary({ onDetail }) {
 
 const hmShortTxt = (min) => { const x = Math.round(min); return html`${Math.floor(x / 60)}<small>h</small> ${String(x % 60).padStart(2, '0')}<small>min</small>`; };
 const hoursTxt = (h) => (h == null ? '–' : h >= 48 ? `${Math.floor(h / 24)} d ${Math.round(h % 24)} h` : `${Math.round(h)} h`);
+
+/** Thin stage strip for the summary card (like Salud's sleep card). */
+function MiniStages({ s }) {
+  const lvl = { 0: 0, 3: 1, 1: 2, 2: 3 };
+  const st = s.stages || [];
+  if (!st.length) return null;
+  const runs = [];
+  for (let i = 0; i < st.length;) { let j = i; while (j + 1 < st.length && st[j + 1] === st[i]) j++; runs.push([i, j + 1, st[i]]); i = j + 1; }
+  const W = 300, H = 40;
+  return html`<div class="col" style="gap:2px">
+    <svg viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" style="width:100%;height:40px;display:block">
+      ${runs.map(([a, b, k]) => html`<rect x=${(a / st.length) * W} width=${Math.max(0.8, ((b - a) / st.length) * W)} y=${lvl[k] * (H / 4) + 1} height=${H / 4 - 2} rx="1.5" fill=${STAGES[k].c} />`)}
+    </svg>
+    <div class="row between tiny muted"><span>${hhmm(s.start)}</span><span>${hhmm(s.end)}</span></div></div>`;
+}

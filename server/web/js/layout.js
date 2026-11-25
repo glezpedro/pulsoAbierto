@@ -2,7 +2,7 @@
 import { html } from '../vendor/preact-htm.js';
 import { useStore, ago, useEventTarget, toast } from './core.js';
 import { Icon } from './icons.js';
-import { strap, CONN } from './ble/strap.js';
+import { strap, CONN, REPAIR_HELP } from './ble/strap.js';
 
 // ------------------------------------------------------------ sync button
 export function SyncButton({ big }) {
@@ -21,7 +21,7 @@ export function SyncButton({ big }) {
   }
   const btn = html`<button class=${`btn ${big ? 'big primary' : 'small'}`} onClick=${onClick} disabled=${busy}>
     ${busy ? html`<span class="spinner"></span>` : html`<${Icon} n="sync" />`}
-    ${busy ? (s.conn === 'syncing' ? `${s.records} registros…` : CONN[s.conn]) : strap.connected ? 'Sincronizar' : 'Conectar pulsera'}
+    ${busy ? (s.conn === 'syncing' ? `${s.records.toLocaleString('es-ES')} guardados…` : CONN[s.conn]) : strap.connected ? 'Sincronizar' : 'Conectar pulsera'}
   </button>`;
   if (!big) return btn;
   const connecting = ['choosing', 'connecting', 'pairing', 'handshaking'].includes(s.conn);
@@ -29,6 +29,7 @@ export function SyncButton({ big }) {
     ${btn}
     ${connecting && html`<button class="btn small" style="align-self:center" onClick=${() => strap.resetConnection()}>¿Atascado? Reiniciar conexión</button>`}
     ${s.error && !busy && html`<div class="small bad" style="text-align:center">${s.error}</div>`}
+    ${!strap.connected && !busy && html`<details class="small muted" style="text-align:center"><summary>¿Ha perdido el vínculo o no aparece en la lista?</summary>${REPAIR_HELP}</details>`}
   </div>`;
 }
 
@@ -60,8 +61,9 @@ export function Page({ title, right, children }) {
 
 function batteryChip(e, s) {
   if (!e?.known) return null;
-  const lvl = s.battery != null && strap.connected ? s.battery : e.estimated;
-  const charging = strap.connected ? s.charging : e.charging;
+  // always the server's coherent level: the raw strap value mixes in the battery pack while charging
+  const lvl = e.estimated;
+  const charging = e.charging || (strap.connected && s.charging);
   const h = e.remainingHours;
   const left = charging ? (e.toFullMinutes != null ? `llena en ${e.toFullMinutes >= 60 ? `${Math.floor(e.toFullMinutes / 60)} h ${e.toFullMinutes % 60} min` : `${e.toFullMinutes} min`}` : 'cargando')
     : h == null ? '' : h >= 48 ? `${Math.floor(h / 24)} d ${Math.round(h % 24)} h` : `${Math.round(h)} h`;
@@ -86,9 +88,9 @@ export function SyncProgress() {
       <div class="row between"><b>Descargando de la pulsera</b><b class="num">${p?.pct != null ? `${Math.floor(p.pct)} %` : '…'}</b></div>
       <div class=${`progress ${p?.pct == null ? 'indet' : ''}`}><i style=${{ width: `${p?.pct || 0}%` }}></i></div>
       <div class="row between small muted">
-        <span>${s.records.toLocaleString('es-ES')} registros${p?.rate ? ` · ${Math.round(p.rate)}× tiempo real` : ''}</span>
+        <span>${s.records.toLocaleString('es-ES')} guardados · ${s.received.toLocaleString('es-ES')} recibidos${p?.rate ? ` · ${Math.round(p.rate)}× tiempo real` : ''}</span>
         <span>Queda ${fmt(p?.etaSec)}</span></div>
-      ${since && html`<div class="tiny muted">Datos desde ${since} · ${s.chunks} bloques ya guardados en el móvil</div>`}
+      <div class="tiny muted">${since ? `Datos desde ${since} · ` : ''}${s.chunks} bloques confirmados (guardados en el móvil y en el servidor)${s.discarded ? ` · ${s.discarded.toLocaleString('es-ES')} descartados` : ''}</div>
       <div class="row between"><span class="tiny muted">Mantén la pantalla encendida y Bluefy abierto.</span>
         <button class="btn small danger" onClick=${() => strap.cancelSync()}>Cancelar</button></div>`
     : html`

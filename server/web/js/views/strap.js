@@ -2,7 +2,7 @@ import { html, useState } from '../../vendor/preact-htm.js';
 import { useApi, useStore, store, api, toast, n, ago, download, useEventTarget, dateTime, C } from '../core.js';
 import { Card, Stat, Spinner, ChartBox, timeX } from '../ui.js';
 import { Page, SyncButton } from '../layout.js';
-import { strap, CONN } from '../ble/strap.js';
+import { strap, CONN, CONNECT_HELP, REPAIR_HELP } from '../ble/strap.js';
 import { Icon } from '../icons.js';
 import { AlarmControl } from './alarm.js';
 
@@ -19,14 +19,14 @@ export function StrapView() {
       <${Card} span="5" title=${s.name || dev.name || 'WHOOP 4.0'} icon=${html`<${Icon} n="watch" />`}>
         <div class="row"><span class=${`dot ${strap.connected ? 'on' : ''}`}></span><b>${strap.supported ? CONN[s.conn] : 'Navegador sin Bluetooth'}</b></div>
         <${SyncButton} big />
-        ${s.error && html`<div class="small bad">${s.error}</div>`}
-        ${s.conn === 'syncing' && html`<div class="small">Descargando: <b>${s.records}</b> registros · ${s.chunks} bloques confirmados</div>`}
+        ${s.conn !== 'syncing' && s.syncStarted && html`<div class="small">Última descarga: <b>${n(s.records)}</b> registros guardados · ${n(s.received)} recibidos · ${s.chunks} bloques confirmados${s.discarded ? ` · ${n(s.discarded)} descartados` : ''}</div>`}
         <${Stat} k="En la muñeca" v=${s.worn == null ? '–' : s.worn ? 'Sí' : 'No'} />
         <${Stat} k="Nº de serie" v=${s.serial || dev.serial || '–'} />
         <${Stat} k="Firmware" v=${s.firmware || dev.firmware || '–'} />
-        <${Stat} k="Reloj de la pulsera" v=${s.clock ? s.clock.toLocaleString('es-ES') : '–'} />
+        <${Stat} k="Reloj de la pulsera" v=${clockText(s, dev)} />
         <${Stat} k="Última descarga" v=${ago(s.lastSync || (status?.lastSync || 0) * 1000)} />
         <${Stat} k="Pendiente de subir al servidor" v=${`${s.pending} bloques`} />
+        <${Stat} k="Bloques en crudo en el servidor" v=${status?.raw ? `${n(status.raw.chunks)}${status.raw.unstored ? ` · ${n(status.raw.unstored)} sin registros guardados` : ''}` : '–'} />
         ${s.note && html`<${Stat} k="Formato de registro" v=${s.note} />`}
         ${s.pending > 0 && html`<button class="btn small" onClick=${() => strap.upload()}>Reintentar subida</button>`}<//>
       <${Card} span="7" title="Acciones" icon=${html`<${Icon} n="bt" />`}>
@@ -39,8 +39,10 @@ export function StrapView() {
         </div>
         <div class="field"><label>Despertador en la pulsera (vibra aunque el móvil esté lejos)</label><${AlarmControl} /></div>
         <div class="small muted"><b>Cómo funciona la sincronización:</b> la pulsera guarda días de datos segundo a segundo. Al pulsar Sincronizar, Bluefy los descarga, los guarda primero en el móvil (para no perder nada) y después la pulsera borra solo lo confirmado. Luego se suben al servidor, que lo analiza todo. Mantén la pantalla encendida hasta que termine (1–3 min por día de datos).</div>
-        <div class="small muted"><b>Primera vez:</b> cierra la app oficial de WHOOP (solo una app puede tener la pulsera), pulsa Conectar y acepta el emparejamiento de iOS.</div><//>
-      <${Card} span="12" title="Pulsera de segunda mano" icon=${html`<${Icon} n="watch" />`}><${SecondHand} status=${status} /><//>
+        <div class="small muted"><b>Primera vez:</b> cierra la app oficial de WHOOP (solo una app puede tener la pulsera), pulsa Conectar y acepta el emparejamiento de iOS.</div>
+        <div class="small muted"><b>Si no conecta:</b> ${CONNECT_HELP}</div>
+        <div class="small muted"><b>Para volver a emparejarla</b> (si se perdió el vínculo Bluetooth): ${REPAIR_HELP}</div><//>
+      ${status?.settings?.ignoreBefore && html`<${Card} span="12" title="Pulsera de segunda mano" icon=${html`<${Icon} n="watch" />`}><${SecondHand} status=${status} /><//>`}
       <${Card} span="6" title="Sincronizaciones" icon=${html`<${Icon} n="sync" />`}>
         ${(log.data || []).map((l) => html`<${Stat} k=${dateTime(l.ts)} v=${`${n(l.records)} registros · ${l.first_ts ? `${dateTime(l.first_ts)} → ${dateTime(l.last_ts)}` : ''}`} />`)}
         ${!log.data?.length && html`<div class="small muted">Sin sincronizaciones todavía.</div>`}<//>
@@ -52,36 +54,48 @@ export function StrapView() {
         <div class="row">
           <button class="btn small" onClick=${() => download(`pulso-tramas-${Date.now()}.csv`, strap.rawCSV(), 'text/csv')} disabled=${!s.rawCount}>Descargar tramas</button>
           <button class="btn small" onClick=${() => download('pulso-ble-log.txt', strap.logText())}>Descargar registro</button>
+          <${Reprocess} status=${status} />
         </div>
+        <div class="tiny muted">Cada bloque de historial se guarda en crudo (en el móvil y en el servidor) antes de leerlo, y la pulsera solo borra un bloque cuando sus registros ya están guardados en los dos sitios. «Reprocesar» vuelve a leer los bloques del servidor que no dieron registros (por ejemplo, por una hora mal puesta) y guarda lo que se pueda recuperar.</div>
         <div class="log">${[...s.log].reverse().slice(0, 200).map((l) => html`<div class=${l.level}>${new Date(l.t).toLocaleTimeString('es-ES')} ${l.text}</div>`)}</div><//>
     </div>
   <//>`;
 }
 
+function clockText(s, dev) {
+  if (s.clock) {
+    const d = s.clockDrift;
+    const drift = d == null ? '' : Math.abs(d) < 2 ? ' · en hora' : ` · ${d > 0 ? '+' : ''}${n(d)} s`;
+    return `${s.clock.toLocaleString('es-ES')}${drift}${s.clockOk === false ? ' ⚠️ sin verificar' : ''}`;
+  }
+  if (s.clockRaw) return `ilegible (bytes ${s.clockRaw})`;
+  if (s.clockOk === false) return 'perdida: se ajustará al conectar';
+  if (dev.clock && dev.clockOk) return `${new Date(dev.clock * 1000).toLocaleString('es-ES')} (última conexión)`;
+  return 'sin leer: conecta la pulsera';
+}
+
+/** Read-only: the filter was applied when the strap arrived; the previous owner's data is gone. */
 function SecondHand({ status }) {
   const cut = status?.settings?.ignoreBefore;
-  const toLocal = (ts) => { const d = new Date(ts * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
-  const [when, setWhen] = useState(cut ? toLocal(cut) : toLocal(Math.floor(Date.now() / 1000)));
-  const save = async (ts) => {
-    try {
-      await api('/settings', { method: 'PUT', json: { ignoreBefore: ts } });
-      store.set({ status: { ...status, settings: { ...status.settings, ignoreBefore: ts } } });
-      toast(ts ? `Se descartará todo lo grabado antes del ${new Date(ts * 1000).toLocaleString('es-ES')}` : 'Filtro quitado: se guardará todo');
-    } catch (e) { toast(e.message); }
-  };
+  const pg = status?.purge;
   return html`
-    <div class="small">Si la pulsera era de otra persona, su memoria puede tener días de datos suyos sin descargar. Pulso los <b>descarga y los descarta</b>: la pulsera libera la memoria de la forma normal (al confirmar cada bloque) y no se usa ningún comando de borrado. Así no se mezclan con tus métricas ni con tu línea base.</div>
-    ${cut
-      ? html`<div class="row"><span class="pill yellow">Descartando todo lo anterior a ${new Date(cut * 1000).toLocaleString('es-ES')}</span>
-          <span class="small muted">${n(status?.discardedPrevious || 0)} registros descartados hasta ahora</span></div>`
-      : html`<div class="row"><span class="pill">Sin filtro: se guarda todo</span></div>`}
-    <div class="row">
-      <button class="btn primary" onClick=${() => save(Math.floor(Date.now() / 1000))}>Descartar todo lo anterior a ahora</button>
-      <input type="datetime-local" value=${when} onChange=${(e) => setWhen(e.target.value)} style="width:auto" />
-      <button class="btn small" onClick=${() => save(Math.floor(new Date(when).getTime() / 1000))}>Usar esta fecha</button>
-      ${cut && html`<button class="btn small" onClick=${() => save(null)}>Quitar filtro</button>`}
-    </div>
-    <div class="small muted"><b>Orden recomendado al recibirla:</b> 1) el dueño anterior la elimina de su cuenta de WHOOP y la olvida en Ajustes › Bluetooth de su iPhone; 2) cárgala; 3) aquí, pulsa «Descartar todo lo anterior a ahora»; 4) conéctala y sincroniza (la primera descarga puede tardar varios minutos si tenía muchos días guardados; deja la pantalla encendida); 5) póntela. Puedes dejar el filtro puesto: solo afecta a datos anteriores a esa fecha.</div>`;
+    <div class="row"><span class="pill yellow">Datos del dueño anterior descartados (todo lo grabado antes del ${new Date(cut * 1000).toLocaleString('es-ES')})</span></div>
+    <div class="small muted">${n(status?.discardedPrevious || 0)} registros descartados al descargar${pg?.done ? ` · ${n(pg.moved)} registros que ya estaban guardados se retiraron del análisis${pg.days?.length ? ` (días ${pg.days.join(', ')})` : ''}` : ''}. Todo lo que grabes a partir de esa fecha se guarda con normalidad.</div>`;
+}
+
+function Reprocess({ status }) {
+  const [busy, setBusy] = useState(null);
+  const unstored = status?.raw?.unstored || 0;
+  const run = async () => {
+    setBusy('0 %');
+    try {
+      const r = await strap.reprocessRaw((i, total) => setBusy(`${Math.round((i / Math.max(1, total)) * 100)} %`));
+      toast(r.chunks ? `Reprocesados ${n(r.chunks)} bloques: ${n(r.stored)} registros recuperados` : 'No hay bloques pendientes de reprocesar');
+      api('/status').then((st) => store.set({ status: st })).catch(() => {}); store.bump();
+    } catch (e) { toast(e.message); }
+    setBusy(null);
+  };
+  return html`<button class="btn small" disabled=${!!busy || !unstored} onClick=${run}>${busy ? html`<span class="spinner"></span>Reprocesando ${busy}` : `Reprocesar bloques en crudo${unstored ? ` (${n(unstored)})` : ''}`}</button>`;
 }
 
 export function BatteryCard({ compact }) {
@@ -90,7 +104,15 @@ export function BatteryCard({ compact }) {
   const b = useApi('/battery?days=14', [strap.s.battery, strap.s.charging]);
   const e = b.data;
   const [busy, setBusy] = useState(false);
-  const read = async () => { setBusy(true); try { const v = await strap.refreshBattery(); toast(v != null ? `Batería ${n(v)} %` : 'La pulsera no respondió'); setTimeout(b.reload, 800); } catch (err) { toast(err.message); } setBusy(false); };
+  const read = async () => {
+    setBusy(true);
+    try {
+      const v = await strap.refreshBattery();
+      if (v == null) toast('La pulsera no respondió');
+      else setTimeout(async () => { const e2 = await api('/battery?days=1').catch(() => null); toast(e2?.known ? `Batería ${n(e2.estimated)} %` : `Batería ${n(v)} %`); b.reload(); }, 800);
+    } catch (err) { toast(err.message); }
+    setBusy(false);
+  };
   if (!e) return html`<${Card} title="Batería" icon=${html`<${Icon} n="battery" />`} span=${compact ? undefined : '12'}><${Spinner} /><//>`;
   if (!e.known) return html`<${Card} title="Batería" icon=${html`<${Icon} n="battery" />`} span=${compact ? undefined : '12'}><div class="small muted">Sin lecturas todavía. Conecta la pulsera desde Bluefy: cada sincronización guarda el nivel y con unas pocas lecturas se calcula cuánto le queda.</div><//>`;
   const lvl = e.estimated;
@@ -125,6 +147,7 @@ export function BatteryCard({ compact }) {
         <${Stat} k="Última carga" v=${e.lastChargedAt ? when(e.lastChargedAt) : '–'} />
         ${e.avgLifeDays && html`<${Stat} k="Duración media real" v=${`${n(e.avgLifeDays, 1)} días (${e.cycles} ciclos)`} />`}
         ${e.mv && html`<${Stat} k="Voltaje" v=${`${(e.mv / 1000).toFixed(2)} V`} />`}
+        ${e.pack && Date.now() / 1000 - e.pack.ts < 6 * 3600 && html`<${Stat} k="Batería del cargador (pack)" v=${`${n(e.pack.level)} %${e.pack.mv ? ` · ${(e.pack.mv / 1000).toFixed(2)} V` : ''}`} />`}
       </div>
     </div>
     ${!compact && hist.length > 1 && html`<${ChartBox} config=${cfg} height=${190} deps=${[hist.length, e.lastReading, e.charging]} />

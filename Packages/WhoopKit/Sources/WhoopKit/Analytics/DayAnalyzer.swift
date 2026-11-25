@@ -32,6 +32,14 @@ public struct DayMetrics: Codable, Equatable, Identifiable {
     public var wearMinutes: Int?
     public var steps: Double?               // from Apple Health
     public var napMin: Double?
+    // sleep detail (main sleep)
+    public var latencyMin: Double?
+    public var wakeups: Int?
+    public var wasoMin: Double?
+    public var efficiency: Double?          // 0–100
+    public var sleepAvgHR: Double?
+    public var sleepMinHR: Double?
+    public var remCycles: Int?
 
     public init(dayKey: String, dayStart: Int) { self.dayKey = dayKey; self.dayStart = dayStart }
 }
@@ -134,8 +142,13 @@ public enum DayAnalyzer {
         let sessions = SleepAnalyzer.detect(epochs)
         let main = sessions.filter { !$0.isNap && $0.end >= dayStart && $0.end <= dayStart + 16 * 3600 }
             .max { $0.minutesAsleep < $1.minutesAsleep }
+        // Naps: short sleeps that start after the main sleep and end the same day. A night that begins
+        // before midnight ends tomorrow, so it is not a nap of today.
+        // The analysis window stops at midnight, so tonight's sleep shows up truncated: a nap must start
+        // before 20:00 and finish clear of the window edge.
         let naps = sessions.filter { s in
-            s.start >= (main?.end ?? dayStart) && s.start < dayEnd && s != main && s.minutesAsleep >= 15
+            s.start >= (main?.end ?? dayStart) && s.end <= dayEnd - 300 && s.start - dayStart < 20 * 3600
+                && s != main && s.minutesAsleep >= 15 && (s.isNap || s.minutesAsleep < 150)
         }
         report.sleep = main
         report.naps = naps
@@ -163,6 +176,8 @@ public enum DayAnalyzer {
             m.deepMin = Double(s.minutes(.deep)); m.remMin = Double(s.minutes(.rem))
             m.lightMin = Double(s.minutes(.light)); m.awakeMin = Double(s.minutes(.awake))
             m.bedtime = s.start; m.wakeTime = s.end
+            m.latencyMin = Double(s.latencyMinutes); m.wakeups = s.disturbances; m.wasoMin = Double(s.wasoMinutes)
+            m.efficiency = s.efficiency * 100; m.sleepAvgHR = s.avgHR; m.sleepMinHR = s.minHR; m.remCycles = s.remCycles
             m.hrv = s.hrvRMSSD; m.rhr = s.restingHR; m.resp = s.respiratoryRate
             m.skinTemp = s.skinTempRaw; m.spo2 = s.spo2Estimate
 

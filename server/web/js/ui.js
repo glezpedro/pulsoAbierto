@@ -1,5 +1,6 @@
 // Reusable UI components (Preact + htm) and Chart.js wrapper.
 import { html, useEffect, useRef } from '../vendor/preact-htm.js';
+import { ICON_D } from './icons.js';
 import { C, CAT, ZONE_COLORS, ZONES, STAGES, n, hm, hhmm, mdToHtml, recColor } from './core.js';
 
 const Chart = window.Chart;
@@ -201,5 +202,5 @@ const ICON_PATHS = {
 const FILLED = new Set(['heart', 'sleep', 'bolt', 'flame', 'drop']);
 function IconInline({ n }) {
   const f = FILLED.has(n);
-  return html`<svg width="17" height="17" viewBox="0 0 24 24" fill=${f ? 'currentColor' : 'none'} stroke="currentColor" stroke-width=${f ? 1.2 : 2.2} stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${ICON_PATHS[n] || ICON_PATHS.heart} /></svg>`;
+  return html`<svg width="17" height="17" viewBox="0 0 24 24" fill=${f ? 'currentColor' : 'none'} stroke="currentColor" stroke-width=${f ? 1.2 : 2.2} stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${ICON_PATHS[n] || ICON_D[n] || ICON_PATHS.heart} /></svg>`;
 }

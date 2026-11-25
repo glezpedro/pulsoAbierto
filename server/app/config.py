@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 
 DATA_DIR = Path(os.environ.get("PULSO_DATA", "/data"))
 SAMPLES_DIR = DATA_DIR / "samples"
+RAW_DIR = DATA_DIR / "raw"              # history chunks exactly as the strap sent them (source for re-parsing)
+DISCARDED_DIR = DATA_DIR / "discarded"  # samples moved out of the way (previous owner of a second-hand strap)
 DB_PATH = DATA_DIR / "pulso.db"
 BACKUP_DIR = DATA_DIR / "backups"
 ENGINE = os.environ.get("PULSO_ENGINE", "/usr/local/bin/pulso-engine")
@@ -20,5 +22,5 @@ ENV_TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ENV_ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 DISABLE_BACKGROUND = os.environ.get("PULSO_NO_BACKGROUND", "") == "1"
 
-for d in (DATA_DIR, SAMPLES_DIR, BACKUP_DIR):
+for d in (DATA_DIR, SAMPLES_DIR, RAW_DIR, DISCARDED_DIR, BACKUP_DIR):
     d.mkdir(parents=True, exist_ok=True)

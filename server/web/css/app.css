@@ -242,6 +242,82 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.88rem; font-var
 @keyframes indet { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
 .sync-card { background: var(--panel); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow); }
 
+
+/* ---------- gráficas SVG estilo Salud ---------- */
+.hkchart { width: 100%; min-width: 0; position: relative; user-select: none; -webkit-user-select: none; }
+.hkchart svg { overflow: visible; }
+.hkchart .grid { stroke: var(--line); stroke-width: 0.6; }
+.hkchart .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.hkchart .avg { stroke: var(--fg); stroke-opacity: 0.55; stroke-width: 1.2; stroke-dasharray: 4 4; }
+.hkchart .goal { stroke: var(--green); stroke-width: 1.3; stroke-dasharray: 5 4; }
+.hkchart .goal-t { fill: var(--green); font-weight: 600; }
+.hkchart .cursor { stroke: var(--muted); stroke-width: 1; }
+.hkchart .band { fill: var(--fill); }
+.hkchart .lane-t { font-size: 12px; font-weight: 600; }
+.hkchart .lane-v { fill: var(--fg); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.axis-unit { position: absolute; right: 0; top: -2px; font-size: 0.7rem; color: var(--muted); }
+
+.seg-full { display: flex; width: 100%; }
+.seg-full button { flex: 1; padding: 6px 0; }
+.btn.icon { padding: 6px 9px; }
+
+.bighead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.bh-label { font-size: 0.74rem; font-weight: 600; color: var(--muted); letter-spacing: 0.03em; text-transform: uppercase; }
+.bh-value { font-family: var(--rounded); font-size: 2.35rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.bh-value small { font-family: var(--font); font-size: 0.95rem; color: var(--muted); font-weight: 600; margin: 0 4px 0 2px; }
+.bh-sub { font-size: 0.85rem; color: var(--muted); }
+.hero-card { gap: 14px; }
+.score-chip { display: flex; flex-direction: column; align-items: center; padding: 6px 12px; border-radius: 14px; background: color-mix(in srgb, var(--c) 14%, transparent); color: var(--c); flex: none; }
+.score-chip b { font-family: var(--rounded); font-size: 1.5rem; line-height: 1.1; }
+.score-chip span { font-size: 0.72rem; font-weight: 600; }
+
+.stackbar { display: flex; gap: 2px; border-radius: 99px; overflow: hidden; background: var(--fill); }
+.stackbar i { display: block; height: 100%; }
+.stage-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.stage-cell { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.stage-v { font-family: var(--rounded); font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stage-v small { font-family: var(--font); font-size: 0.72rem; color: var(--muted); margin: 0 2px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+.rangedot { position: relative; height: 14px; }
+.rangedot .track { position: absolute; left: 0; right: 0; top: 6px; height: 2px; border-radius: 2px; background: var(--fill); }
+.rangedot .typ { position: absolute; top: 3px; height: 8px; border-radius: 99px; opacity: 0.28; }
+.rangedot .dot { position: absolute; top: 1px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; border: 2px solid var(--panel); box-shadow: 0 0 0 0.5px var(--line); }
+.vital-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 0.5px solid var(--line); }
+.vital-row:last-of-type { border-bottom: none; }
+.note { border-radius: 12px; padding: 10px 12px; background: var(--fill); }
+.warn-note { background: color-mix(in srgb, var(--orange) 14%, transparent); }
+
+.lane-readout { display: flex; gap: 10px; align-items: center; min-height: 26px; flex-wrap: wrap; }
+.lane-readout b { font-family: var(--rounded); font-size: 1.15rem; }
+
+.timeline { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+.tl-item { display: flex; gap: 10px; align-items: center; padding: 6px 0; position: relative; }
+.tl-ic { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--sleep) 16%, transparent); color: var(--sleep); flex: none; }
+.tl-item b { font-family: var(--rounded); font-size: 1.05rem; }
+
+.hl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.hl { gap: 8px; }
+.hl-text { font-size: 0.95rem; line-height: 1.4; }
+
+.tonight { display: flex; gap: 22px; align-items: flex-end; flex-wrap: wrap; }
+.tn-box { display: flex; flex-direction: column; gap: 2px; }
+.tn-big { font-family: var(--rounded); font-size: 3rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.tn-input { width: auto !important; font-size: 1.3rem; font-family: var(--rounded); font-weight: 600; }
+.about summary { cursor: pointer; display: flex; gap: 8px; align-items: center; font-weight: 600; color: var(--accent); list-style: none; }
+.about summary::-webkit-details-marker { display: none; }
+.about p { margin: 0; }
+
+/* detalle de métrica */
+.h1-detail { font-size: 1.75rem; margin-top: 4px; line-height: 1.15; }
+.metric-about { font-size: 0.92rem; line-height: 1.45; }
+.metric-about p { margin: 0 0 8px; }
+.kv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.kv { background: var(--panel-2); border-radius: 12px; padding: 9px 11px; display: flex; flex-direction: column; gap: 1px; }
+.kv span { font-size: 0.74rem; color: var(--muted); font-weight: 600; }
+.kv b { font-family: var(--rounded); font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.kv b small { font-family: var(--font); font-size: 0.75rem; color: var(--muted); margin-left: 2px; }
+
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 
 /* ---------- tablet ---------- */
@@ -271,4 +347,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 0.88rem; font-var
   .rings { gap: 10px; }
   .big-number { font-size: 3.6rem; }
   .bubble { max-width: 92%; }
+  .stage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bh-value { font-size: 2.1rem; }
+  .hl-grid { grid-template-columns: 1fr; }
+  .tn-big { font-size: 2.5rem; }
 }

@@ -18,6 +18,7 @@ import { StrapView } from './views/strap.js';
 import { BodyView } from './views/body.js';
 import { JournalView } from './views/journal.js';
 import { SettingsView } from './views/settings.js';
+import { MetricView } from './views/metric.js';
 
 export const ROUTES = [
   { id: 'hoy', title: 'Resumen', icon: 'heart', view: TodayView, group: 'Diario' },
@@ -85,8 +86,8 @@ function Sidebar({ route }) {
 
 function TabBar({ route }) {
   const items = { hoy: ['Resumen', 'heart'], sueno: ['Sueño', 'sleep'], carga: ['Carga', 'bolt'], pulsera: ['Pulsera', 'watch'], mas: ['Explorar', 'grid'] };
-  const inMore = !TABS.includes(route);
-  return html`<nav class="tabbar">${TABS.map((t) => html`<a href=${`#/${t}`} class=${route === t || (t === 'mas' && inMore) ? 'active' : ''}>
+  const inMore = !TABS.includes(route) && !route.startsWith('m/');
+  return html`<nav class="tabbar">${TABS.map((t) => html`<a href=${`#/${t}`} class=${route === t || (t === 'mas' && inMore) || (t === 'hoy' && route.startsWith('m/')) ? 'active' : ''}>
     <span class="ic"><${Icon} n=${items[t][1]} size=${24} /></span>${items[t][0]}</a>`)}</nav>`;
 }
 
@@ -103,10 +104,11 @@ function App() {
   const route = useRoute();
   const st = useStore();
   const r = ROUTES.find((x) => x.id === route);
+  const mkey = route.startsWith('m/') ? route.slice(2) : null;
   const View = route === 'mas' ? MoreView : (r ? r.view : TodayView);
   return html`<div class="shell">
     <${Sidebar} route=${route} />
-    <main class="main"><${View} /></main>
+    <main class="main">${mkey ? html`<${MetricView} mkey=${mkey} key=${mkey} />` : html`<${View} />`}</main>
     <${TabBar} route=${route} />
     ${st.toast && html`<div class="toast" role="status">${st.toast}</div>`}
   </div>`;

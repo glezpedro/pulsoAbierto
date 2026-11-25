@@ -125,6 +125,7 @@ struct SeriesPoint: Encodable {
     let temp: Double?
     let contact: Double
     let rmssd: Double?
+    let resp: Double?
 }
 
 struct HRVReq: Decodable { let rr: [Double] }
@@ -221,9 +222,11 @@ case "series":
         guard let g = groups[k] else { return nil }
         let hrs = g.compactMap { $0.hasData ? $0.hr : nil }
         let rr = g.flatMap(\.rr)
+        // breathing rate needs ≥ 5 consecutive minutes of R-R: only for coarse steps
+        let resp = step >= 300 ? Respiratory.rate(epochs: g.sorted { $0.ts < $1.ts }) : nil
         return SeriesPoint(t: k * step, hr: Stats.mean(hrs), lo: g.compactMap(\.hrMin).min(), hi: g.compactMap(\.hrMax).max(),
                            motion: Stats.mean(g.compactMap(\.motion)), temp: Stats.mean(g.compactMap(\.skinTemp)),
-                           contact: Stats.mean(g.map(\.contact)) ?? 0, rmssd: HRV.compute(rr)?.rmssd)
+                           contact: Stats.mean(g.map(\.contact)) ?? 0, rmssd: HRV.compute(rr)?.rmssd, resp: resp)
     }
     out(pts)
 

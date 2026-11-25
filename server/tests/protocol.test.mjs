@@ -1,7 +1,8 @@
 // node --test server/tests/protocol.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFrame, validFrame, FrameAssembler, parse, fromHex, hex, decodeChunk, encodeSamples, payload, detectLayout, parseHeartRate, CMD, TYPE } from '../web/js/ble/protocol.js';
+import { buildFrame, validFrame, FrameAssembler, parse, fromHex, hex, decodeChunk, encodeSamples, payload, detectLayout, parseHeartRate, CMD, TYPE,
+  packFrames, splitFrames, fixTimestamp, read, TS_MIN } from '../web/js/ble/protocol.js';
 
 const captured = [
   'aa0800a823080e016c935474', 'aa0800a823070e00c7e40f08', 'aa0800a8230e16001147c585',
@@ -61,4 +62,70 @@ test('layout detector', () => {
 test('standard heart rate', () => {
   const r = parseHeartRate(new Uint8Array([0x10, 72, 0x55, 0x03]));
   assert.equal(r.bpm, 72); assert.deepEqual(r.rr, [833]);
+});
+
+// ---------------------------------------------------------------- history chunks, clock and raw copies
+const le32 = (v) => [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
+/** A real-format v24 history frame (96 bytes) with the given strap timestamp and heart rate. */
+function v24(ts, bpm = 60, seq = 1) {
+  const inner = new Uint8Array(88); inner[0] = TYPE.history; inner[1] = seq; inner[2] = 7;
+  const put = (bytes, off) => bytes.forEach((x, i) => { inner[off - 4 + i] = x; });
+  put(le32(ts), 11); put([bpm, 1], 21); put([1000 & 255, 1000 >> 8], 23); put([1], 55);
+  return buildFrame(inner[0], inner[1], inner[2], [...inner.slice(3)]);
+}
+const NOW = 1795600000;   // 2026-11-25
+
+test('records with an impossible date are counted, not silently dropped', () => {
+  const frames = [v24(NOW - 10), v24(NOW - 9), v24(3600), v24(3601), v24(NOW + 5000)];
+  const { samples, stats } = decodeChunk(frames, { nowS: NOW });
+  assert.equal(samples.length, 2);
+  assert.deepEqual([stats.frames, stats.decoded, stats.valid, stats.tooOld, stats.future], [5, 5, 2, 2, 1]);
+  assert.equal(stats.rawFirst, 3600);
+});
+
+test('clock fix moves the records written with the wrong strap clock', () => {
+  // strap clock lost: it said 1970 + 50000 s when the real time was NOW
+  const fixes = [{ strapAt: 50000, offset: NOW - 50000 }];
+  const night = Array.from({ length: 30 }, (_, i) => v24(50000 - 8 * 3600 + i));   // recorded 8 h before connecting
+  const { samples, stats } = decodeChunk(night, { fixes, nowS: NOW });
+  assert.equal(samples.length, 30);
+  assert.equal(stats.fixed, 30);
+  assert.equal(samples[0].ts, NOW - 8 * 3600);
+  assert.equal(samples[0].rawTs, 50000 - 8 * 3600);
+  // records written with a correct clock are not touched by an unrelated fix
+  assert.deepEqual(fixTimestamp(NOW - 100, fixes), { ts: NOW - 100, fixed: false });
+  // tiny offsets are not "fixes"
+  assert.equal(fixTimestamp(NOW, [{ strapAt: NOW, offset: 30 }]).fixed, false);
+  assert.ok(TS_MIN > 1e9);
+});
+
+test('raw chunk copy round-trips byte for byte', () => {
+  const meta1 = buildFrame(TYPE.metadata, 1, 1, [...le32(NOW), 0, 0, 0, 0]);
+  const frames = [meta1, v24(NOW - 3), v24(NOW - 2), buildFrame(51, 9, 0, [1, 2, 3]), fromHex(captured[5])];
+  const raw = packFrames(frames);
+  assert.equal(raw.length, frames.reduce((a, f) => a + f.length, 0));
+  const back = splitFrames(raw);
+  assert.equal(back.length, frames.length);
+  back.forEach((f, i) => assert.equal(hex(f), hex(frames[i])));
+  const end = parse(back[4]);
+  assert.equal(end.kind, 'meta'); assert.equal(end.meta, 2); assert.equal(hex(end.ack), '2e47010004000000');
+});
+
+test('GET_CLOCK: the clock offset is learnt from the reading that matches the phone', () => {
+  const body = [0x01, ...le32(12345), ...le32(NOW + 3), 0, 0];
+  const r = { body: new Uint8Array(body) };
+  assert.equal(read.clockOffsetNear(r, NOW, 120), 5);
+  assert.equal(read.clockAt(r, 5), NOW + 3);
+  assert.equal(read.clockOffsetNear(r, NOW + 100000, 120), null);
+  assert.equal(read.clockAt(r, 1), 12345);
+});
+
+test('battery event keeps its raw bytes for later decoding', () => {
+  const pl = new Array(24).fill(0);
+  const put = (bytes, off) => bytes.forEach((x, i) => { pl[off - 7 + i] = x; });
+  put([0x10, 0x27, 0, 0], 8); put([725 & 255, 725 >> 8], 17); put([3830 & 255, 3830 >> 8], 21); put([1], 26);
+  const f = buildFrame(TYPE.event, 4, 3, pl);
+  const e = parse(f);
+  assert.equal(e.kind, 'event'); assert.equal(e.battery, 72.5); assert.equal(e.mv, 3830); assert.equal(e.charging, true);
+  assert.equal(e.raw, hex(f));
 });

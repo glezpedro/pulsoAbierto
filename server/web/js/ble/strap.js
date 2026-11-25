@@ -1,12 +1,26 @@
 // Web Bluetooth driver for the WHOOP 4.0 (works in Bluefy on iPhone and Chrome on desktop/Android).
-import { UUID, TYPE, CMD, EVENTS, FrameAssembler, buildFrame, parse, decodeChunk, encodeSamples, payload, read, parseHeartRate, hex, u32 } from './protocol.js';
-import { queue, flush } from './queue.js';
+//
+// History download rules (nothing may be lost):
+//  1. Every chunk is stored RAW (all its frames, byte for byte) on the phone before it is parsed.
+//  2. A chunk is acknowledged to the strap — which then frees that memory — only when it has ≥ 1 valid
+//     record AND it is stored on the phone AND the server has saved the raw chunk and its records.
+//  3. Anything else (0 valid records, phone storage error, server unreachable, server stored nothing)
+//     stops the download WITHOUT acknowledging: the chunk stays on the strap and is logged in detail.
+//  4. The strap clock is read and, if wrong, set BEFORE asking for the history. If it was wrong, the
+//     measured offset is used to fix the timestamps of the records written with that wrong clock.
+import { UUID, TYPE, CMD, EVENTS, FrameAssembler, buildFrame, parse, decodeChunk, encodeSamples, payload, read, parseHeartRate,
+  hex, u32, packFrames, splitFrames, describeFrame, TS_MIN } from './protocol.js';
+import { queue, flush, uploadChunk } from './queue.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const withTimeout = (p, ms, msg) => new Promise((resolve, reject) => {
   const t = setTimeout(() => reject(new Error(msg)), ms);
   Promise.resolve(p).then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
 });
+const nowS = () => Date.now() / 1000;
+const fmtTs = (ts) => (ts == null ? '?' : `${new Date(ts * 1000).toLocaleString('es-ES')} (${ts})`);
+const CLOCK_TOLERANCE = 60;          // seconds of drift accepted without setting the clock
+const MAX_FRAMES_PER_CHUNK = 5000;   // safety cap for non-history frames kept for diagnosis
 
 export const CONN = {
   unsupported: 'Este navegador no tiene Bluetooth (usa Bluefy en iPhone)',
@@ -15,18 +29,31 @@ export const CONN = {
   disconnected: 'Desconectada',
 };
 
+/** What to do when the connection fails (iOS only offers «Omitir», which breaks the bond). */
+export const CONNECT_HELP = 'Cierra Bluefy, apaga y enciende el Bluetooth en Ajustes y vuelve a intentarlo. NO pulses «Omitir».';
+/** How to put the strap back in pairing mode when the bond was lost. */
+export const REPAIR_HELP = 'Quítatela, pon el sensor hacia arriba y da toques firmes unos 30 s hasta que la luz parpadee en azul; luego pulsa Conectar.';
+
 class Strap extends EventTarget {
   constructor() {
     super();
     this.s = {
-      conn: navigator.bluetooth ? 'idle' : 'unsupported', name: null, battery: null, charging: false, worn: null,
-      serial: null, firmware: null, clock: null, records: 0, chunks: 0, pending: 0, uploaded: 0, note: '',
+      conn: navigator.bluetooth ? 'idle' : 'unsupported', name: null, battery: null, charging: false, worn: null, mv: null,
+      serial: null, firmware: null,
+      clock: null, clockOk: null, clockDrift: null, clockRaw: null, clockBefore: null,
+      received: 0,      // history frames received in this download
+      records: 0,       // records the SERVER stored in this download (the real number)
+      discarded: 0,     // records the server discarded (second-hand filter…), they stay in the raw chunks
+      chunks: 0,        // chunks acknowledged to the strap
+      unconfirmed: 0,   // chunks NOT acknowledged (they stay on the strap)
+      pending: 0, uploaded: 0, note: '',
       liveHR: null, liveRR: [], liveOn: false, lastSync: Number(localStorage.getItem('pulso.lastSync') || 0) || null,
       error: null, log: [], raw: false, rawCount: 0, syncStarted: null,
       prog: null,   // { firstTs, lastTs, startedAt, pct, etaSec, rate } while downloading history
     };
     this.device = null; this.chars = {}; this.asm = {}; this.seq = 0; this.pending = new Map();
-    this.historyFrames = []; this.historyActive = false; this.lastTraffic = 0; this.rawFrames = [];
+    this.chunk = null; this.historyActive = false; this.stopping = false; this.lastTraffic = 0; this.rawFrames = [];
+    this.commitChain = Promise.resolve();
     this.hrListeners = new Set(); this.wakeLock = null; this.busyWrite = Promise.resolve();
     queue.count().then((n) => this.set({ pending: n })).catch(() => {});
   }
@@ -34,7 +61,7 @@ class Strap extends EventTarget {
   set(p) { Object.assign(this.s, p); this.dispatchEvent(new Event('change')); }
   log(text, level = 'info') {
     const line = { t: Date.now(), text, level };
-    this.s.log = [...this.s.log.slice(-400), line];
+    this.s.log = [...this.s.log.slice(-600), line];
     this.dispatchEvent(new Event('change'));
   }
   onHR(fn) { this.hrListeners.add(fn); return () => this.hrListeners.delete(fn); }
@@ -92,7 +119,7 @@ class Strap extends EventTarget {
 
   async openWithTimeout(device) {
     this.attach(device);
-    await withTimeout(this.open(), 60000, 'La pulsera no respondió a tiempo.');
+    await withTimeout(this.open(), 90000, 'La pulsera no respondió a tiempo.');
   }
 
   attach(device) {
@@ -110,12 +137,12 @@ class Strap extends EventTarget {
     for (const [, p] of this.pending) p.resolve(null);
     this.pending.clear();
     this.historyActive = false;
+    this.chunk = null;
     clearInterval(this.battTimer);
     this.releaseWake();
     // after a failed attempt with the remembered strap, the next tap goes straight to the chooser
     this.skipKnown = true;
-    const hint = msg ? `${msg} Pulsa «Conectar pulsera» otra vez. Si la pulsera no aparece en la lista: en el iPhone ve a Ajustes › Bluetooth › WHOOP › ⓘ › Desconectar y vuelve a intentarlo.` : null;
-    this.set({ conn: 'idle', error: hint, prog: null, liveOn: false });
+    this.set({ conn: 'idle', error: msg ? `${msg} ${CONNECT_HELP}` : null, prog: null, liveOn: false });
     if (msg) this.log(`Error de conexión: ${msg}`, 'error');
   }
 
@@ -159,8 +186,8 @@ class Strap extends EventTarget {
       const c = this.chars[k];
       if (!c) continue;
       this.asm[k] = new FrameAssembler();
-      c.addEventListener('characteristicvaluechanged', (ev) => this.onValue(k, ev.target.value));
-      try { await c.startNotifications(); } catch (e) { this.log(`Notificaciones ${k}: ${e.message}`, 'warn'); }
+      if (!c.__pulso) { c.addEventListener('characteristicvaluechanged', (ev) => this.onValue(k, ev.target.value)); c.__pulso = true; }
+      try { await c.startNotifications(); } catch (e) { this.log(`Notificaciones ${k}: ${e.message}`, k === 'data' ? 'error' : 'warn'); }
     }
     await this.handshake();
   }
@@ -174,14 +201,13 @@ class Strap extends EventTarget {
     if (nm) this.set({ name: read.name(nm) || this.s.name });
     const v = await this.send(CMD.reportVersion);
     if (v) this.set({ firmware: read.versions(v) });
-    const sc = await this.send(CMD.setClock, payload.setClock());   // the strap clock ships unset
-    const gc = await this.send(CMD.getClock);
-    if (gc) this.set({ clock: read.clock(gc) });
-    this.log(`Reloj ajustado (res ${sc?.result ?? '?'}) → ${this.s.clock?.toLocaleString() ?? '?'}`);
+    await this.syncClock();            // BEFORE the history: records must carry the right time
     await this.send(CMD.rawRealtime, [0]);
-    await this.send(CMD.getDataRange);
+    const range = await this.send(CMD.getDataRange);
+    if (range) this.log(`Rango de datos en la pulsera: ${hex(range.body)}`);
     const b = await this.send(CMD.getBattery);
-    if (b) this.set({ battery: read.battery(b) });
+    const lvl = b ? read.battery(b) : null;
+    if (lvl != null) { this.set({ battery: lvl }); this.postBattery({ battery: lvl, charging: this.s.charging, mv: null, source: 'lectura' }); }
     await this.readAlarm();
     this.set({ conn: 'ready' });
     this.postDevice();
@@ -192,15 +218,73 @@ class Strap extends EventTarget {
     await this.syncHistory();
   }
 
+  // ------------------------------------------------------------ strap clock
+  clockFixes() {
+    try { return JSON.parse(localStorage.getItem('pulso.clockFixes') || '[]'); } catch { return []; }
+  }
+  addClockFix(fix) {
+    const list = this.clockFixes().filter((f) => Math.abs(f.offset - fix.offset) > 120);
+    list.unshift(fix);
+    localStorage.setItem('pulso.clockFixes', JSON.stringify(list.slice(0, 6)));
+    const h = Math.abs(fix.offset) / 3600;
+    const by = h >= 48 ? `${Math.round(h / 24).toLocaleString('es-ES')} días` : h >= 1 ? `${Math.round(h)} h` : `${Math.round(Math.abs(fix.offset) / 60)} min`;
+    this.log(`La pulsera tenía la hora mal (marcaba ${fmtTs(fix.strapAt)}): los registros grabados con esa hora se corrigen ${by}${fix.offset < 0 ? ' hacia atrás' : ''}.`, 'warn');
+  }
+
+  /** Reads the strap clock; if it is unreadable, invalid or more than CLOCK_TOLERANCE s off, sets it and
+   *  reads it back. The byte offset of the clock in the GET_CLOCK reply (undocumented) is learnt from the
+   *  reading that matches the phone right after SET_CLOCK. Returns true when the clock is verified. */
+  async syncClock() {
+    let byte = localStorage.getItem('pulso.clockByte');
+    byte = byte == null ? null : Number(byte);
+    const t0 = nowS();
+    const before = await this.send(CMD.getClock);
+    if (before && byte == null) {
+      const o = read.clockOffsetNear(before, t0, CLOCK_TOLERANCE);
+      if (o != null) { byte = o; localStorage.setItem('pulso.clockByte', String(o)); }
+    }
+    let strapBefore = before ? read.clockAt(before, byte) : null;
+    const okBefore = strapBefore != null && Math.abs(strapBefore - t0) <= CLOCK_TOLERANCE;
+    this.log(`Reloj de la pulsera al conectar: ${before ? `${byte != null ? fmtTs(strapBefore) : 'formato aún desconocido'} · bytes ${hex(before.body)}` : 'sin respuesta'}`, okBefore ? 'info' : 'warn');
+
+    let ok = okBefore, after = null, strapAfter = okBefore ? strapBefore : null, tAfter = t0;
+    for (let i = 1; !ok && i <= 3; i++) {
+      const sc = await this.send(CMD.setClock, payload.setClock());
+      await sleep(300);
+      after = await this.send(CMD.getClock);
+      tAfter = nowS();
+      const o = after ? read.clockOffsetNear(after, tAfter, 120) : null;
+      if (o != null) { byte = o; localStorage.setItem('pulso.clockByte', String(o)); strapAfter = read.clockAt(after, o); ok = true; }
+      this.log(`Ajuste de hora ${i}/3: respuesta ${sc ? sc.result : 'ninguna'} → ${after ? `bytes ${hex(after.body)}` : 'sin respuesta'} → ${ok ? 'correcta' : 'sigue sin cuadrar'}`, ok ? 'info' : 'warn');
+      if (!ok) await sleep(800);
+    }
+    // now that the clock position is known, re-read the value the strap had when we connected
+    if (before && byte != null) strapBefore = read.clockAt(before, byte);
+    if (!okBefore && strapBefore != null && byte != null && ok) {
+      const offset = Math.round(t0 - strapBefore);
+      if (Math.abs(offset) >= 300) this.addClockFix({ strapAt: strapBefore, offset, measuredAt: Math.round(t0) });
+    }
+    const shown = strapAfter ?? strapBefore;
+    const ref = strapAfter != null ? tAfter : t0;
+    const rawBody = after || before;
+    this.set({
+      clock: shown != null ? new Date(shown * 1000) : null, clockOk: ok, clockBefore: strapBefore,
+      clockDrift: shown != null ? Math.round(shown - ref) : null, clockRaw: rawBody ? hex(rawBody.body) : null,
+    });
+    if (!ok) this.log('No se pudo comprobar la hora de la pulsera. Se descarga igualmente, pero los registros con fecha imposible NO se confirman (se quedan en la pulsera y en crudo).', 'error');
+    return ok;
+  }
+
   onDisconnect() {
     this.log('Desconectada', 'warn');
     for (const [, p] of this.pending) p.resolve(null);
     this.pending.clear();
     const wasSync = this.historyActive;
     this.historyActive = false;
+    this.chunk = null;               // a chunk cut halfway is not acknowledged: the strap resends it
     clearInterval(this.battTimer);
     this.releaseWake();
-    this.set({ conn: 'disconnected', liveOn: false, liveHR: null });
+    this.set({ conn: 'disconnected', liveOn: false, liveHR: null, prog: null });
     if (wasSync) this.upload();
   }
 
@@ -245,7 +329,10 @@ class Strap extends EventTarget {
       return;
     }
     if (this.s.raw) { this.rawFrames.push(`${Math.floor(Date.now() / 1000)},${k},${hex(bytes)}`); this.s.rawCount = this.rawFrames.length; }
-    for (const f of this.asm[k].push(bytes)) this.onFrame(f);
+    const asm = this.asm[k];
+    const before = asm.crcFail;
+    for (const f of asm.push(bytes)) this.onFrame(f, k);
+    if (asm.crcFail > before) this.log(`${asm.crcFail - before} trama(s) con CRC incorrecto descartadas en ${k}`, 'warn');
   }
 
   liveTick(bpm, rr) {
@@ -255,7 +342,11 @@ class Strap extends EventTarget {
     this.dispatchEvent(new Event('change'));
   }
 
-  onFrame(f) {
+  /** True for the frames that still arrive for a short while after a download was stopped: ignored
+   *  (and therefore never acknowledged — they stay on the strap). */
+  isTail() { return !this.historyActive && this.cancelledAt && Date.now() - this.cancelledAt < 10000; }
+
+  onFrame(f, k) {
     const m = parse(f);
     switch (m.kind) {
       case 'response': {
@@ -269,22 +360,41 @@ class Strap extends EventTarget {
       case 'event': this.onEvent(m); break;
       case 'meta':
         this.lastTraffic = Date.now();
-        if (!this.historyActive && this.cancelledAt && Date.now() - this.cancelledAt < 10000) break;
-        if (m.meta === 1) this.historyFrames = [];
-        else if (m.meta === 2) { const frames = this.historyFrames; this.historyFrames = []; this.commit(frames, m.ack); }
-        else if (m.meta === 3) this.finishHistory();
+        if (this.isTail()) break;
+        if (m.meta === 1) {
+          if (this.chunk?.frames.length > 1) this.log(`Bloque anterior sin final (${this.chunk.frames.length} tramas): no se confirma`, 'warn');
+          this.chunk = { frames: [f], start: m.unix };
+          if (!this.historyActive) { this.historyActive = true; this.set({ conn: 'syncing' }); }
+        } else if (m.meta === 2) {
+          const c = this.chunk || { frames: [], start: null, noStart: true };
+          c.frames.push(f);
+          this.chunk = null;
+          this.enqueueCommit(c, m);
+        } else if (m.meta === 3) {
+          this.commitChain.then(() => this.finishHistory(true));
+        } else this.log(`Metadatos de historial tipo ${m.meta}: ${describeFrame(f)}`, 'warn');
         break;
       case 'history':
-        if (!this.historyActive && this.cancelledAt && Date.now() - this.cancelledAt < 10000) break;  // tail after a cancel: not acked, stays on the strap
+        if (this.isTail()) break;
         this.lastTraffic = Date.now();
         if (!this.historyActive) { this.historyActive = true; this.set({ conn: 'syncing' }); }
-        this.historyFrames.push(m.raw);
-        this.s.records++;
-        this.track(m.raw);
-        if (this.s.records % 100 === 0) this.dispatchEvent(new Event('change'));
+        if (!this.chunk) this.chunk = { frames: [], start: null, noStart: true };
+        this.chunk.frames.push(f);
+        this.s.received++;
+        this.track(f);
+        if (this.s.received % 100 === 0) this.dispatchEvent(new Event('change'));
         break;
       case 'realtime': this.liveTick(m.bpm, m.rr); break;
-      case 'unknown': this.log(`Trama tipo ${m.type} (${m.len} B) sin decodificar`, 'warn'); break;
+      case 'raw':
+      case 'unknown':
+        // Not history as we know it. While a chunk is open it is kept (it will be in the raw copy and
+        // counted in the diagnosis) so a new record type can never be thrown away unnoticed.
+        if (this.chunk && !this.isTail()) {
+          this.lastTraffic = Date.now();
+          if (this.chunk.frames.length < MAX_FRAMES_PER_CHUNK) this.chunk.frames.push(f);
+          if (!this.chunk.loggedOther) { this.chunk.loggedOther = true; this.log(`Trama no reconocida dentro de un bloque (${k}): ${describeFrame(f)}`, 'warn'); }
+        } else if (m.kind === 'unknown') this.log(`Trama tipo ${m.type} (${m.len} B) sin decodificar: ${describeFrame(f, 24)}`, 'warn');
+        break;
       default: break;
     }
   }
@@ -293,16 +403,20 @@ class Strap extends EventTarget {
     const label = EVENTS[e.code] || `Evento ${e.code}`;
     this.log(`Evento: ${label}`, 'rx');
     const p = {};
-    if (e.code === 3 && e.battery != null) { p.battery = e.battery; p.charging = e.charging; if (e.mv) p.mv = e.mv; }
+    // Battery events: while the pack charges the strap they alternate between the strap and the pack, so
+    // each one is sent as it came (never mixed with other readings); the server tells them apart.
+    // «charging» comes from events 7/8; a battery event only confirms it (the pack's events say «not charging»).
+    if (e.code === 3 && e.battery != null) { if (e.charging) p.charging = true; this.postBattery({ battery: e.battery, charging: e.charging, mv: e.mv || null, raw: e.raw, source: 'evento' }); }
     if (e.code === 7) p.charging = true;
     if (e.code === 8) p.charging = false;
     if (e.code === 9) p.worn = true;
     if (e.code === 10) p.worn = false;
+    if (e.code === 13) { p.clockOk = false; this.log('La pulsera avisa de que ha perdido la hora: se ajustará antes de la próxima descarga.', 'warn'); }
     if (e.code === 33) p.liveOn = true;
     if (e.code === 34) p.liveOn = false;
     if (e.code === 57) this.saveAlarm(null, Math.floor(Date.now() / 1000));   // 58 = «Hacer vibrar» desde la app
     if (e.code === 59) this.saveAlarm(null);
-    if (Object.keys(p).length) { this.set(p); this.postDevice(); }
+    if (Object.keys(p).length) { this.set(p); if (e.code !== 13 && e.code !== 3) this.postDevice(); }
     if ([7, 8, 9, 10, 13, 14, 57, 58, 59].includes(e.code)) queue.putEvent({ ts: Math.floor(Date.now() / 1000), code: e.code, label }).catch(() => {});
     this.dispatchEvent(new CustomEvent('strapevent', { detail: e }));
   }
@@ -312,29 +426,36 @@ class Strap extends EventTarget {
    *  span [first record … now] already received is the share of the download done. */
   track(raw) {
     const ts = u32(raw, 11);
-    const nowS = Date.now() / 1000;
-    if (!ts || ts < 1.5e9 || ts > nowS + 86400) return;
+    const t = nowS();
+    if (!ts || ts < TS_MIN || ts > t + 86400) return;
     const p = this.s.prog || { firstTs: ts, lastTs: ts, startedAt: Date.now() };
     p.firstTs = Math.min(p.firstTs, ts);
     p.lastTs = Math.max(p.lastTs, ts);
-    const span = Math.max(1, nowS - p.firstTs);
+    const span = Math.max(1, t - p.firstTs);
     p.pct = Math.max(0, Math.min(99.5, ((p.lastTs - p.firstTs) / span) * 100));
     const el = (Date.now() - p.startedAt) / 1000;
     p.rate = el > 3 ? (p.lastTs - p.firstTs) / el : null;          // seconds of data per real second
-    p.etaSec = p.rate ? Math.max(0, (nowS - p.lastTs) / p.rate) : null;
+    p.etaSec = p.rate ? Math.max(0, (t - p.lastTs) / p.rate) : null;
     this.s.prog = p;
   }
 
   /** Stops the download safely: the strap is told to abort, the chunk in progress is NOT acknowledged
-   *  (so it stays on the strap for next time) and everything already acknowledged is kept and uploaded. */
+   *  (so it stays on the strap for next time) and everything already stored is kept and uploaded. */
   async cancelSync() {
     if (!this.historyActive) return;
+    await this.stopHistory('Sincronización cancelada por el usuario: el bloque en curso se queda en la pulsera.', 'warn');
+  }
+
+  /** Ends the download without acknowledging anything else. `reason` is shown to the user. */
+  async stopHistory(reason, level = 'error') {
+    if (this.stopping) return;
+    this.stopping = true;
     this.cancelledAt = Date.now();
     this.historyActive = false;
-    this.historyFrames = [];
+    this.chunk = null;
     this.releaseWake();
-    this.log('Sincronización cancelada por el usuario: el bloque en curso se queda en la pulsera.', 'warn');
-    this.set({ conn: this.device?.gatt?.connected ? 'ready' : 'disconnected', prog: null });
+    this.log(reason, level);
+    this.set({ conn: this.device?.gatt?.connected ? 'ready' : 'disconnected', prog: null, error: level === 'error' ? reason : this.s.error });
     try { await this.send(CMD.abortHistory, [0], 2500); } catch { /* ignore */ }
     this.upload();
   }
@@ -342,8 +463,11 @@ class Strap extends EventTarget {
   async syncHistory() {
     if (!this.connected || this.historyActive) return;
     this.historyActive = true;
+    this.stopping = false;
     this.cancelledAt = null;
-    this.set({ conn: 'syncing', records: 0, chunks: 0, syncStarted: Date.now(), error: null, prog: null });
+    this.chunk = null;
+    this.commitChain = Promise.resolve();
+    this.set({ conn: 'syncing', received: 0, records: 0, discarded: 0, chunks: 0, unconfirmed: 0, syncStarted: Date.now(), error: null, prog: null });
     this.lastTraffic = Date.now();
     this.acquireWake();
     this.log('Iniciando descarga de historial…');
@@ -354,37 +478,86 @@ class Strap extends EventTarget {
         clearInterval(watchdog);
         this.log('Historial inactivo 45 s: se da por terminado', 'warn');
         await this.send(CMD.abortHistory, [0]);
-        this.finishHistory();
+        await this.commitChain;
+        this.finishHistory(false);
       }
     }, 5000);
   }
 
-  async commit(frames, ack) {
-    const { samples, note } = decodeChunk(frames);
-    try {
-      if (samples.length) {
-        await queue.putChunk(encodeSamples(samples), { first: samples[0].ts, last: samples[samples.length - 1].ts, note });
-      }
-    } catch (e) {
-      this.log(`No se pudo guardar el bloque en el móvil (${e.message}): NO se confirma`, 'error');
-      return;
-    }
-    if (ack) {
-      const r = await this.send(CMD.historyResult, payload.ack(ack));
-      this.s.chunks++;
-      this.log(`Bloque confirmado: ${samples.length} reg (${note}) res ${r?.result ?? '?'}`);
-    }
-    queue.count().then((n) => this.set({ pending: n, note: note || this.s.note }));
-    this.upload();
+  enqueueCommit(c, m) {
+    this.commitChain = this.commitChain
+      .then(() => this.commit(c, m))
+      .catch((e) => this.stopHistory(`Error inesperado al guardar un bloque (${e.message || e}): NO se ha confirmado.`));
   }
 
-  finishHistory() {
-    if (!this.historyActive) return;
+  /** Stores, uploads and — only if everything went well — acknowledges one history chunk. */
+  async commit(c, m) {
+    if (this.stopping) return;
+    const hist = c.frames.filter((f) => f[4] === TYPE.history);
+    const types = {};
+    for (const f of c.frames) types[f[4]] = (types[f[4]] || 0) + 1;
+    const typesTxt = Object.entries(types).map(([t, n]) => `tipo ${t}×${n}`).join(', ');
+    const fixes = this.clockFixes();
+    const { samples, note, stats } = decodeChunk(hist, { fixes });
+    const meta = {
+      at: Math.floor(nowS()), ack: m.ack ? hex(m.ack) : null, trim: m.trim ?? null, chunkStart: c.start, noStart: !!c.noStart,
+      types, note, stats, fixes, clock: { ok: this.s.clockOk, before: this.s.clockBefore, drift: this.s.clockDrift },
+      firmware: this.s.firmware, serial: this.s.serial,
+      head: hist[0] ? describeFrame(hist[0], 48) : (c.frames[0] ? describeFrame(c.frames[0], 48) : null),
+    };
+    const rec = { bytes: packFrames(c.frames), samples: encodeSamples(samples), meta };
+
+    // 1) raw + samples on the phone, before anything else
+    let id;
+    try { id = await queue.putRaw(rec); }
+    catch (e) { return this.stopHistory(`No se pudo guardar el bloque en el móvil (${e.message}): NO se confirma y sigue en la pulsera.`); }
+    queue.count().then((n) => this.set({ pending: n })).catch(() => {});
+
+    // 2) nothing valid → diagnose, keep it raw (phone + server), do NOT acknowledge
+    if (!samples.length) {
+      this.log(`Bloque con 0 registros válidos: ${c.frames.length} tramas (${typesTxt || 'ninguna'}), ${hist.length} de historial, `
+        + `${stats.decoded} decodificados, ${stats.tooOld} con fecha anterior a 2017/1970, ${stats.future} con fecha futura`
+        + `${stats.rawFirst != null ? ` · fechas en bruto ${fmtTs(stats.rawFirst)} → ${fmtTs(stats.rawLast)}` : ''}`
+        + ` · formato ${note || '—'} · primera trama: ${meta.head || '—'}`, 'error');
+      try { const res = await uploadChunk(rec); if (res.rawSaved) await queue.markUploaded(id, res); } catch { /* stays pending on the phone */ }
+      return this.stopHistory('Ha llegado un bloque sin registros válidos. NO se ha confirmado: sigue en la pulsera y guardado en crudo para analizarlo (Pulsera › Diagnóstico).');
+    }
+    if (stats.tooOld || stats.future) this.log(`En el bloque hay ${stats.tooOld + stats.future} registros con fecha imposible (${stats.tooOld} antiguos, ${stats.future} futuros): no se guardan como datos, pero quedan en crudo.`, 'warn');
+
+    // 3) server: raw chunk + records
+    let res;
+    try { res = await uploadChunk(rec); }
+    catch (e) { return this.stopHistory(`No se pudo subir el bloque al servidor (${e.message}). NO se ha confirmado: sigue en la pulsera y guardado en el móvil.`); }
+    const reasons = res.reasons || {};
+    const reasonsTxt = [reasons.invalid && `${reasons.invalid} con fecha imposible`, reasons.future && `${reasons.future} futuros`,
+      reasons.beforeFilter && `${reasons.beforeFilter} anteriores al filtro de segunda mano`, reasons.duplicate && `${reasons.duplicate} ya guardados`].filter(Boolean).join(', ');
+    if (!res.rawSaved) return this.stopHistory('El servidor no guardó el bloque en crudo: NO se confirma.');
+    // accepted = stored now, already stored before (re-sent chunk) or deliberately filtered (previous owner)
+    if ((res.stored || 0) + (reasons.beforeFilter || 0) + (reasons.duplicate || 0) < 1 && !res.duplicate) {
+      return this.stopHistory(`El servidor no guardó ningún registro del bloque${reasonsTxt ? ` (${reasonsTxt})` : ''}. NO se ha confirmado: sigue en la pulsera.`);
+    }
+    await queue.markUploaded(id, res).catch(() => {});
+
+    // 4) everything is safe → acknowledge (the strap may now free this memory)
+    if (!m.ack) { this.log('El bloque no trae código de confirmación: guardado, pero la pulsera lo volverá a enviar.', 'warn'); return; }
+    if (this.stopping) return;
+    const r = await this.send(CMD.historyResult, payload.ack(m.ack));
+    const dup = res.duplicate ? (res.stored || 0) : (reasons.duplicate || 0);
+    this.set({ chunks: this.s.chunks + 1, records: this.s.records + (res.duplicate ? 0 : (res.stored || 0)),
+      discarded: this.s.discarded + Math.max(0, (res.discarded || 0) - dup), note: note || this.s.note });
+    this.log(`Bloque confirmado: ${samples.length} válidos, ${res.stored || 0} guardados${res.discarded ? `, ${res.discarded} descartados (${reasonsTxt})` : ''}${res.duplicate ? ' (ya estaba en el servidor)' : ''} · ${note} · respuesta ${r?.result ?? 'ninguna'}`);
+    queue.count().then((n) => this.set({ pending: n })).catch(() => {});
+  }
+
+  finishHistory(complete) {
+    if (!this.historyActive || this.stopping) return;
     this.historyActive = false;
+    this.chunk = null;
     const now = Date.now();
-    localStorage.setItem('pulso.lastSync', String(now));
-    this.set({ conn: this.device?.gatt?.connected ? 'ready' : 'disconnected', lastSync: now, prog: null });
-    this.log(`Descarga completa: ${this.s.records} registros en ${Math.round((now - (this.s.syncStarted || now)) / 1000)} s`);
+    const p = { conn: this.device?.gatt?.connected ? 'ready' : 'disconnected', prog: null };
+    if (complete) { localStorage.setItem('pulso.lastSync', String(now)); p.lastSync = now; }
+    this.set(p);
+    this.log(`Descarga ${complete ? 'completa' : 'terminada'}: ${this.s.records} registros guardados en el servidor, ${this.s.received} recibidos, ${this.s.chunks} bloques confirmados en ${Math.round((now - (this.s.syncStarted || now)) / 1000)} s`);
     this.releaseWake();
     this.upload();
   }
@@ -394,18 +567,50 @@ class Strap extends EventTarget {
       const n = await flush((t) => this.set({ uploaded: t }));
       const pending = await queue.count();
       this.set({ pending });
-      if (n) this.log(`Subidos ${n} registros al servidor`);
+      if (n) this.log(`Subidos ${n} registros pendientes al servidor`);
       this.dispatchEvent(new Event('uploaded'));
     } catch (e) {
       const pending = await queue.count().catch(() => this.s.pending);
-      this.set({ pending, error: `Sin conexión con el servidor: ${e.message}. Los datos quedan guardados en el móvil.` });
+      this.set({ pending });
+      if (pending) this.log(`Subida pendiente: ${e.message}. Los datos quedan guardados en el móvil.`, 'warn');
     }
   }
 
+  /** Re-parses the raw chunks the server holds whose records were not stored (for example because the
+   *  strap clock was wrong) and stores what can be recovered. Does not need the strap. */
+  async reprocessRaw(onProgress) {
+    const r = await fetch('/api/raw?unstored=1&limit=5000');
+    if (!r.ok) throw new Error(`servidor ${r.status}`);
+    const items = (await r.json()).items || [];
+    let stored = 0, valid = 0;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const rb = await fetch(`/api/raw/${it.id}`);
+      if (!rb.ok) continue;
+      const frames = splitFrames(new Uint8Array(await rb.arrayBuffer())).filter((f) => f[4] === TYPE.history);
+      const fixes = [...(it.meta?.fixes || []), ...this.clockFixes()];
+      const { samples, stats } = decodeChunk(frames, { fixes });
+      valid += stats.valid;
+      const up = await fetch(`/api/raw/${it.id}/samples`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: encodeSamples(samples) });
+      if (up.ok) stored += (await up.json()).stored || 0;
+      onProgress?.(i + 1, items.length, stored);
+    }
+    this.log(`Reprocesados ${items.length} bloques en crudo del servidor: ${valid} registros válidos, ${stored} guardados.`);
+    return { chunks: items.length, valid, stored };
+  }
+
+  /** Device info for the server (no battery: readings go through postBattery, one by one). */
   postDevice() {
     const s = this.s;
     fetch('/api/device', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ battery: s.battery, charging: s.charging, mv: s.mv, worn: s.worn, serial: s.serial, firmware: s.firmware, name: s.name, clock: s.clock ? Math.floor(s.clock / 1000) : null }) }).catch(() => {});
+      body: JSON.stringify({ charging: s.charging, worn: s.worn, serial: s.serial, firmware: s.firmware, name: s.name,
+        clock: s.clock ? Math.floor(s.clock / 1000) : null, clockOk: s.clockOk, clockDrift: s.clockDrift }) }).catch(() => {});
+  }
+
+  /** One battery reading exactly as the strap gave it. */
+  postBattery(b) {
+    fetch('/api/device', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...b, worn: this.s.worn }) })
+      .then(() => this.dispatchEvent(new Event('battery'))).catch(() => {});
   }
 
   // ------------------------------------------------------------ actions
@@ -447,7 +652,7 @@ class Strap extends EventTarget {
   async refreshBattery() {
     const b = await this.send(CMD.getBattery);
     const v = b ? read.battery(b) : null;
-    if (v != null) { this.set({ battery: v }); this.postDevice(); this.dispatchEvent(new Event('battery')); }
+    if (v != null) { this.set({ battery: v }); this.postBattery({ battery: v, charging: this.s.charging, mv: null, source: 'lectura' }); }
     return v;
   }
   async reboot() { await this.send(CMD.reboot, [0]); }
@@ -468,11 +673,11 @@ window.addEventListener('pagehide', () => { if (strap.device?.gatt?.connected) {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && strap.device && !strap.device.gatt?.connected && strap.connected) strap.onDisconnect();
 });
-// Vigilante: ningún estado de conexión puede quedarse colgado más de 75 s.
+// Vigilante: ningún estado de conexión puede quedarse colgado más de 100 s.
 let stuckSince = 0;
 setInterval(() => {
   const busy = ['connecting', 'pairing', 'handshaking'].includes(strap.s.conn);
   if (!busy) { stuckSince = 0; return; }
   stuckSince = stuckSince || Date.now();
-  if (Date.now() - stuckSince > 75000) { stuckSince = 0; strap.fail('La conexión se quedó atascada.'); }
+  if (Date.now() - stuckSince > 100000) { stuckSince = 0; strap.fail('La conexión se quedó atascada.'); }
 }, 5000);

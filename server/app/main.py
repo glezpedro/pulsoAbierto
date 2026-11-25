@@ -12,10 +12,10 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import analysis, battery, db, hooks, reports, strava, telegram
-from .config import ALLOWED_LOGINS, DB_PATH, DISABLE_BACKGROUND, SAMPLES_DIR, WEB_DIR
-from .core import (EngineError, add_days, append_samples, day_bounds, day_key, engine, hr_max, local, now, physio,
-                   profile, sample_stats, secret, settings, today_key, week_key, bmr, DEFAULT_PROFILE, DEFAULT_SETTINGS)
+from . import analysis, battery, db, hooks, raw, reports, strava, telegram
+from .config import ALLOWED_LOGINS, DB_PATH, DISABLE_BACKGROUND, RAW_DIR, SAMPLES_DIR, WEB_DIR
+from .core import (EngineError, add_days, append_samples_detail, day_bounds, day_key, engine, hr_max, local, now, physio,
+                   profile, reset_sample_cache, sample_stats, secret, settings, today_key, week_key, bmr, DEFAULT_PROFILE, DEFAULT_SETTINGS)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("pulso")
@@ -27,6 +27,17 @@ async def lifespan(app: FastAPI):
     if not DISABLE_BACKGROUND:
         tasks = [asyncio.create_task(analysis.worker()), asyncio.create_task(telegram.loop()),
                  asyncio.create_task(hooks.scheduler())]
+    # the engine computes more per day than before → re-analyse stored days once (in the background)
+    if db.kv_get("analysis_version") != analysis.ANALYSIS_VERSION:
+        n = await analysis.reanalyze_all()
+        db.kv_set("analysis_version", analysis.ANALYSIS_VERSION)
+        if n:
+            log.info("análisis v%s: re-analizando %d días", analysis.ANALYSIS_VERSION, n)
+    # second-hand strap: move the previous owner's samples (stored before the filter was on) out of the way
+    try:
+        raw.purge_previous_owner()
+    except Exception:  # noqa: BLE001
+        log.exception("no se pudo limpiar los datos del dueño anterior")
     # resume interrupted work
     if db.one("SELECT 1 FROM days WHERE dirty=1"):
         analysis._event.set()
@@ -75,6 +86,7 @@ async def status():
         "hasAnthropic": bool(secret("anthropic")), "settings": s, "profile": profile(), "hrMax": hr_max(), "bmr": bmr(),
         "physio": physio(), "dirty": db.one("SELECT COUNT(*) c FROM days WHERE dirty=1")["c"],
         "discardedPrevious": db.kv_get("discarded_previous", 0) or 0,
+        "purge": db.kv_get("purge_info"), "raw": raw.stats(),
         "battery": battery.estimate(),
     }
 
@@ -110,36 +122,83 @@ async def put_secrets(p: dict = Body(...)):
 
 # ===================================================================== sync from Bluefy
 
+def _after_store(d: dict, source: str = "bluefy") -> list[str]:
+    """Book-keeping after records were appended: sync log, discard counter and days to re-analyse."""
+    discarded = d["received"] - d["stored"]
+    if d["reasons"].get("beforeFilter"):
+        db.kv_set("discarded_previous", (db.kv_get("discarded_previous", 0) or 0) + d["reasons"]["beforeFilter"])
+    if discarded:
+        log.info("registros descartados: %s", d["reasons"])
+    if not d["stored"]:
+        return []
+    db.ex("INSERT INTO sync_log(ts, records, first_ts, last_ts, source) VALUES(?,?,?,?,?)", (now(), d["stored"], d["first"], d["last"], source))
+    db.kv_set("last_sync_ts", now())
+    return analysis.mark_dirty(d["first"], d["last"])
+
+
 @app.post("/api/samples")
 async def post_samples(request: Request):
     blob = await request.body()
     try:
-        n, first, last = await asyncio.to_thread(append_samples, blob)
+        d = await asyncio.to_thread(append_samples_detail, blob)
     except ValueError as ex:
         raise HTTPException(400, str(ex))
-    received = len(blob) // 32
-    discarded = received - n
-    if discarded:
-        d = db.kv_get("discarded_previous", 0) or 0
-        db.kv_set("discarded_previous", d + discarded)
-    if n:
-        db.ex("INSERT INTO sync_log(ts, records, first_ts, last_ts, source) VALUES(?,?,?,?,?)", (now(), n, first, last, "bluefy"))
-        db.kv_set("last_sync_ts", now())
-        days = analysis.mark_dirty(first, last)
-    else:
-        days = []
-    return {"stored": n, "discarded": discarded, "first": first, "last": last, "days": days}
+    days = _after_store(d)
+    return {"stored": d["stored"], "discarded": d["received"] - d["stored"], "reasons": d["reasons"], "first": d["first"], "last": d["last"], "days": days}
+
+
+@app.post("/api/chunk")
+async def post_chunk(p: dict = Body(...)):
+    """One history chunk from Bluefy: raw bytes (base64) + decoded samples (base64) + diagnosis. The raw
+    chunk is on disk before this returns `rawSaved: true`; only then does the web acknowledge it."""
+    try:
+        res = await asyncio.to_thread(raw.save_chunk, p.get("raw"), p.get("samples"), p.get("meta") or {})
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    if not res.get("duplicate"):
+        d = {"received": res["stored"] + res["discarded"], "stored": res["stored"], "first": res["first"], "last": res["last"], "reasons": res["reasons"]}
+        res["days"] = _after_store(d)
+    return res
+
+
+@app.get("/api/raw")
+async def raw_list(limit: int = 200, unstored: int = 0, days: int | None = None):
+    return {"stats": raw.stats(), "items": raw.listing(min(max(limit, 1), 10000), bool(unstored), days)}
+
+
+@app.get("/api/raw/{chunk_id}")
+async def raw_get(chunk_id: int):
+    path = raw.chunk_path(chunk_id)
+    if not path or not path.exists():
+        raise HTTPException(404, "bloque no encontrado")
+    return FileResponse(path, media_type="application/octet-stream", filename=path.name)
+
+
+@app.post("/api/raw/{chunk_id}/samples")
+async def raw_samples(chunk_id: int, request: Request):
+    blob = await request.body()
+    try:
+        d = await asyncio.to_thread(raw.add_samples, chunk_id, blob)
+    except KeyError:
+        raise HTTPException(404, "bloque no encontrado")
+    except ValueError as ex:
+        raise HTTPException(400, str(ex))
+    days = _after_store(d, "reproceso")
+    return {"stored": d["stored"], "discarded": d["received"] - d["stored"], "reasons": d["reasons"], "days": days}
 
 
 @app.post("/api/device")
 async def post_device(p: dict = Body(...)):
     d = db.kv_get("device", {}) or {}
-    d.update({k: v for k, v in p.items() if v is not None})
+    d.update({k: v for k, v in p.items() if v is not None and k not in ("raw", "source")})
     d["seen"] = now()
     db.kv_set("device", d)
     if p.get("battery") is not None:
-        battery.record(p["battery"], bool(p.get("charging")), p.get("mv"), p.get("source") or "bluefy")
-    hooks.battery_check(p.get("battery"), bool(p.get("charging")))
+        battery.record(p["battery"], bool(p.get("charging")), p.get("mv"), p.get("source") or "bluefy", raw=p.get("raw"))
+    if p.get("battery") is not None:
+        e = battery.estimate()      # the coherent strap level (pack readings and outliers filtered out)
+        if e.get("known"):
+            hooks.battery_check(e.get("estimated"), bool(e.get("charging")))
     return d
 
 
@@ -207,6 +266,21 @@ async def analyze(p: dict = Body(default={})):
     keys = p.get("keys") or [add_days(today_key(), -1), today_key()]
     analysis.mark_keys(keys)
     return {"queued": len(keys)}
+
+
+@app.get("/api/sleep/nights")
+async def sleep_nights(frm: str | None = None, to: str | None = None, days: int = 7):
+    from . import sleepinsights
+    to = to or today_key()
+    frm = frm or add_days(to, -min(max(days, 1), 62) + 1)
+    return sleepinsights.nights(frm, to)
+
+
+@app.get("/api/sleep/insights")
+async def sleep_insights(to: str | None = None, days: int = 30):
+    from . import sleepinsights
+    days = min(max(days, 1), 366)
+    return sleepinsights.insights(to, days, history=max(120, days))
 
 
 @app.get("/api/series")
@@ -902,6 +976,10 @@ async def wipe(p: dict = Body(...)):
         raise HTTPException(400, "Escribe BORRAR para confirmar")
     for f in SAMPLES_DIR.glob("*.bin"):
         f.unlink()
+    for f in RAW_DIR.rglob("*.bin"):
+        f.unlink()
+    db.ex("DELETE FROM raw_chunks")
+    reset_sample_cache()
     for t in ("days", "workouts", "body", "journal", "plans", "chat", "events", "weekly", "sync_log", "spot", "health", "notified", "battery"):
         db.ex(f"DELETE FROM {t}")
     db.kv_del("last_sync_ts")

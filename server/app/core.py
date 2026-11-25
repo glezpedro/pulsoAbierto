@@ -179,21 +179,63 @@ async def engine(cmd: str, payload: dict, timeout: float = 120) -> Any:
 SAMPLE_SIZE = 32
 
 
-def append_samples(blob: bytes) -> tuple[int, int, int]:
-    """Appends raw 32-byte encoded samples. Returns (count, first_ts, last_ts)."""
+_ts_cache: dict[int, set[int]] = {}
+
+
+def reset_sample_cache() -> None:
+    """Call after sample files are rewritten or deleted outside append_samples_detail."""
+    _ts_cache.clear()
+
+
+def _day_ts(day: int) -> set[int]:
+    """Timestamps already stored for a UTC day (cached; kept up to date by append_samples_detail)."""
+    s = _ts_cache.get(day)
+    if s is None:
+        s = set()
+        p = SAMPLES_DIR / f"{day}.bin"
+        if p.exists():
+            b = p.read_bytes()
+            s = {int.from_bytes(b[o:o + 4], "little") for o in range(0, len(b) - len(b) % 32, 32)}
+        if len(_ts_cache) > 40:
+            _ts_cache.clear()
+        _ts_cache[day] = s
+    return s
+
+
+def append_samples_detail(blob: bytes) -> dict:
+    """Appends raw 32-byte encoded samples and says exactly what happened to each record.
+
+    Returns {received, stored, first, last, reasons: {invalid, future, beforeFilter, duplicate}}. Discarded
+    records are never silently lost: the caller keeps the raw chunk they came from. A record whose second
+    is already stored (the strap re-sent a chunk) is not written again, so `stored` counts only new data."""
     if len(blob) % SAMPLE_SIZE:
         raise ValueError("tamaño de bloque inválido")
     n = len(blob) // SAMPLE_SIZE
+    reasons = {"invalid": 0, "future": 0, "beforeFilter": 0, "duplicate": 0}
+    out = {"received": n, "stored": 0, "first": 0, "last": 0, "reasons": reasons}
     if n == 0:
-        return 0, 0, 0
+        return out
     by_day: dict[int, list[bytes]] = {}
     first, last = 1 << 62, 0
     cutoff = int(settings().get("ignoreBefore") or 0)
+    limit = now() + 86400
     for i in range(n):
         rec = blob[i * 32:(i + 1) * 32]
         ts = int.from_bytes(rec[0:4], "little")
-        if ts < 1_500_000_000 or ts > now() + 86400 or ts < cutoff:
+        if ts < 1_500_000_000:
+            reasons["invalid"] += 1
             continue
+        if ts > limit:
+            reasons["future"] += 1
+            continue
+        if ts < cutoff:
+            reasons["beforeFilter"] += 1
+            continue
+        seen = _day_ts(ts // 86400)
+        if ts in seen:                      # this second is already stored (the strap re-sent a chunk)
+            reasons["duplicate"] += 1
+            continue
+        seen.add(ts)
         first, last = min(first, ts), max(last, ts)
         by_day.setdefault(ts // 86400, []).append(rec)
     for day, recs in by_day.items():
@@ -201,9 +243,15 @@ def append_samples(blob: bytes) -> tuple[int, int, int]:
             f.write(b"".join(recs))
             f.flush()
             os.fsync(f.fileno())
-    if last == 0:
-        return 0, 0, 0
-    return sum(len(v) for v in by_day.values()), first, last
+    if last:
+        out.update(stored=sum(len(v) for v in by_day.values()), first=first, last=last)
+    return out
+
+
+def append_samples(blob: bytes) -> tuple[int, int, int]:
+    """Appends raw 32-byte encoded samples. Returns (count, first_ts, last_ts)."""
+    d = append_samples_detail(blob)
+    return d["stored"], d["first"], d["last"]
 
 
 def sample_stats() -> dict:
