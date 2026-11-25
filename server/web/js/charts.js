@@ -41,8 +41,13 @@ function useScrub(count, x2i, onIndex) {
     return i == null ? null : Math.max(0, Math.min(count - 1, i));
   };
   return {
-    onPointerMove: (e) => { if (e.pointerType === 'mouse' || e.buttons || e.pressure > 0) onIndex(pick(e)); },
-    onPointerDown: (e) => { const i = pick(e); touchSel.current = i; onIndex(i); },
+    onPointerMove: (e) => { if (e.pointerType === 'mouse' || e.buttons || e.pressure > 0) { const i = pick(e); touchSel.current = i; onIndex(i); } },
+    // touch: tapping the selected bar again goes back to the period summary (like Salud)
+    onPointerDown: (e) => {
+      const i = pick(e);
+      if (e.pointerType !== 'mouse' && i != null && i === touchSel.current) { touchSel.current = null; onIndex(null); return; }
+      touchSel.current = i; onIndex(i);
+    },
     onPointerLeave: (e) => { if (e.pointerType === 'mouse') onIndex(null); },
     onPointerCancel: () => onIndex(null),
   };
