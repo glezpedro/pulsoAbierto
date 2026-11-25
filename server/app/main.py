@@ -63,7 +63,12 @@ async def tailnet_guard(request: Request, call_next):
         login = (request.headers.get("Tailscale-User-Login") or "").lower()
         if login not in ALLOWED_LOGINS:
             return JSONResponse({"detail": "No autorizado"}, status_code=403)
-    return await call_next(request)
+    resp = await call_next(request)
+    # The web app is plain ES modules: without this, Safari/Bluefy may keep old modules after an update
+    # and mix them with new ones (blank page). "no-cache" = always revalidate (cheap, ETag → 304).
+    if not request.url.path.startswith("/api") and "cache-control" not in resp.headers:
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 def jload(s, default=None):
@@ -992,5 +997,27 @@ async def healthcheck():
     return {"ok": True}
 
 # ===================================================================== static web (SPA)
+
+_BUILD: dict | None = None
+
+
+@app.get("/build.json")
+async def build_info():
+    """Fingerprint of the web files. index.html compares it with the last one it saw and, when it
+    changes, re-downloads every module before starting, so an update never mixes old and new files."""
+    global _BUILD
+    if _BUILD is None:
+        import hashlib
+        h = hashlib.sha256()
+        files = []
+        for f in sorted(WEB_DIR.rglob("*")):
+            if f.is_file() and f.suffix in (".js", ".css"):
+                rel = "/" + f.relative_to(WEB_DIR).as_posix()
+                h.update(rel.encode())
+                h.update(f.read_bytes())
+                files.append(rel)
+        _BUILD = {"build": h.hexdigest()[:16], "files": files}
+    return JSONResponse(_BUILD, headers={"Cache-Control": "no-store"})
+
 
 app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")

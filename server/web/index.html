@@ -16,6 +16,21 @@
 </head>
 <body>
   <div id="app"><div style="padding:40px;color:#8e9aa5;font-family:system-ui">Cargando Pulso…</div></div>
-  <script type="module" src="/js/main.js"></script>
+  <script type="module">
+    // Tras una actualización, Safari/Bluefy puede tener módulos viejos en caché y mezclarlos con los
+    // nuevos (pantalla en blanco). Si la versión cambió, se vuelven a descargar todos antes de arrancar.
+    try {
+      const b = await (await fetch('/build.json', { cache: 'no-store' })).json();
+      let seen = null;
+      try { seen = localStorage.getItem('pulso.build'); } catch { /* private mode */ }
+      if (seen !== b.build) {
+        await Promise.all(b.files.map((f) => fetch(f, { cache: 'reload' }).catch(() => null)));
+        const css = document.querySelector('link[rel=stylesheet][href^="/css/app.css"]');
+        if (css) css.href = `/css/app.css?v=${b.build}`;
+        try { localStorage.setItem('pulso.build', b.build); } catch { /* ignore */ }
+      }
+    } catch { /* sin conexión: arrancar con lo que haya */ }
+    await import('/js/main.js');
+  </script>
 </body>
 </html>
