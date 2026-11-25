@@ -1,9 +1,16 @@
 import { html, useState, useEffect } from '../../vendor/preact-htm.js';
-import { useApi, useStore, api, toast, store, n } from '../core.js';
-import { Card, Stat, Spinner } from '../ui.js';
+import { useApi, useStore, api, toast, store, n, getTheme, setTheme } from '../core.js';
+import { Card, Stat, Spinner, Seg } from '../ui.js';
 import { Page } from '../layout.js';
 import { Icon } from '../icons.js';
 import { HealthShortcutGuide } from './health.js';
+
+function Appearance() {
+  const [t, setT] = useState(getTheme());
+  const pick = (v) => { setT(v); setTheme(v); };
+  return html`<div class="row between"><span class="small muted">Tema de la app en este dispositivo</span>
+    <${Seg} value=${t} onChange=${pick} options=${[['dark', 'Oscuro'], ['light', 'Claro'], ['auto', 'Automático']]} /></div>`;
+}
 
 export function SettingsView() {
   const { status } = useStore();
@@ -15,6 +22,7 @@ export function SettingsView() {
   if (!status) return html`<${Page} title="Ajustes"><${Spinner} /><//>`;
   return html`<${Page} title="Ajustes">
     <div class="grid">
+      <${Card} span="12" title="Apariencia" icon=${html`<${Icon} n="sun" />`}><${Appearance} /><//>
       <${Card} span="6" title="Perfil" icon=${html`<${Icon} n="body" />`}><${Profile} p=${status.profile} hrMax=${status.hrMax} /><//>
       <${Card} span="6" title="Telegram" icon=${html`<${Icon} n="send" />`}><${Telegram} status=${status} /><//>
       <${Card} span="6" title="Notificaciones" icon=${html`<${Icon} n="send" />`}><${Notifs} s=${status.settings} /><//>

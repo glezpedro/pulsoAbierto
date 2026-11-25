@@ -247,7 +247,7 @@ function Lanes({ s, lanes, cursor, setCursor, valueAt, mobile, loading }) {
 }
 
 // ------------------------------------------------------------ vitals
-function Vitals({ v }) {
+export function Vitals({ v }) {
   if (!v || v.nights < 5) return html`<div class="small muted">Con 5 noches registradas Pulso calcula tu rango habitual de cada constante (como la app Constantes del Apple Watch). Llevas ${v?.nights ?? 0}.</div>`;
   const colors = { rhr: C.hr, hrv: C.green, resp: C.resp, sleepAvgHR: C.hr, skinTemp: C.body, sleptMin: C.sleep };
   const fmt = (r, x) => (x == null ? '–' : r.key === 'sleptMin' ? hm(x) : r.key === 'skinTemp' ? '' : `${n(x, r.decimals)} ${r.unit}`);

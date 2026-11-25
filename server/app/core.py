@@ -87,7 +87,8 @@ DEFAULT_SETTINGS = {
     "alarmWindow": 30,
     "alarmAt": None,             # unix time of the alarm programmed on the strap (None = none)
     "alarmRangAt": None,
-    "alarmCleared": None,        # last alarm removed/rung, so a stale GET_ALARM reply doesn't bring it back         # unix time the strap reported the alarm went off
+    "alarmCleared": None,
+    "alarmSchedule": None,       # {"time": "07:00", "days": [1..7] (1 = lunes)} → Pulso programa la siguiente al conectar        # last alarm removed/rung, so a stale GET_ALARM reply doesn't bring it back         # unix time the strap reported the alarm went off
     # Second-hand strap: records older than this unix time are downloaded (so the strap frees its
     # memory through the normal acknowledgement) but discarded instead of stored. None = keep all.
     "ignoreBefore": None,

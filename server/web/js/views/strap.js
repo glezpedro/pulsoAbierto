@@ -43,6 +43,8 @@ export function StrapView() {
         <div class="small muted"><b>Primera vez:</b> cierra la app oficial de WHOOP (solo una app puede tener la pulsera), pulsa Conectar y acepta el emparejamiento de iOS.</div>
         <div class="small muted"><b>Si no conecta:</b> ${CONNECT_HELP}</div>
         <div class="small muted"><b>Para volver a emparejarla</b> (si se perdió el vínculo Bluetooth): ${REPAIR_HELP}</div><//>
+      <${Card} span="12" title="Importante: la app oficial de WHOOP" icon=${html`<${Icon} n="info" />`} color="var(--orange)">
+        <div class="small">No vuelvas a conectar la pulsera a la app oficial de WHOOP salvo que no quede otra opción: puede <b>instalarle un firmware nuevo</b> sin preguntar. En la WHOOP 5.0/MG, algunas versiones de firmware ya no entregan el historial a apps como Pulso. La 4.0 no parece afectada por ahora, pero es mejor no arriesgar. Firmware actual: <b>${s.firmware || dev.firmware || 'desconocido'}</b>.</div><//>
       ${status?.settings?.ignoreBefore && html`<${Card} span="12" title="Pulsera de segunda mano" icon=${html`<${Icon} n="watch" />`}><${SecondHand} status=${status} /><//>`}
       <${Card} span="6" title="Sincronizaciones" icon=${html`<${Icon} n="sync" />`}>
         ${(log.data || []).map((l) => html`<${Stat} k=${dateTime(l.ts)} v=${`${n(l.records)} registros · ${l.first_ts ? `${dateTime(l.first_ts)} → ${dateTime(l.last_ts)}` : ''}`} />`)}

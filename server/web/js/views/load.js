@@ -94,7 +94,7 @@ export function WorkoutTable({ list }) {
   return html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Nombre</th><th>Fuente</th><th>Duración</th><th>Esfuerzo</th><th>FC media</th><th>kcal</th><th class="hide-mobile">Zonas</th></tr></thead>
     <tbody>${list.map((w) => html`<tr style="cursor:pointer" onClick=${() => (location.hash = `#/entreno?w=${encodeURIComponent(w.uid)}`)}>
       <td>${new Date(w.start * 1000).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} ${new Date(w.start * 1000).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</td>
-      <td>${w.name}</td><td class="muted">${w.source}</td><td>${hm((w.end - w.start) / 60)}</td>
+      <td>${w.name}</td><td class="muted">${({ live: 'En directo', strap: 'Pulsera', strong: 'Strong', strava: 'Strava', manual: 'Manual' })[w.source] || w.source}</td><td>${hm((w.end - w.start) / 60)}</td>
       <td style=${{ color: C.strain, fontWeight: 700 }}>${n(w.strain, 1)}</td><td>${n(w.avg_hr)}</td><td>${n(w.kcal)}</td>
       <td class="hide-mobile" style="min-width:120px">${w.zones?.length ? html`<div class="zonebar">${w.zones.slice(1).map((z, i) => html`<i style=${{ flex: z, background: ZONE_COLORS[i + 1] }}></i>`)}</div>` : ''}</td></tr>`)}</tbody></table></div>`;
 }

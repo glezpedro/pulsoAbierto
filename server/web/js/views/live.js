@@ -6,7 +6,7 @@ import { strap } from '../ble/strap.js';
 import { rmssd } from '../ble/protocol.js';
 import { Icon } from '../icons.js';
 
-const zoneOf = (bpm, max) => { const p = bpm / max; return p < 0.5 ? 0 : p < 0.6 ? 1 : p < 0.7 ? 2 : p < 0.8 ? 3 : p < 0.9 ? 4 : 5; };
+export const zoneOf = (bpm, max) => { const p = bpm / max; return p < 0.5 ? 0 : p < 0.6 ? 1 : p < 0.7 ? 2 : p < 0.8 ? 3 : p < 0.9 ? 4 : 5; };
 
 export function LiveView() {
   const [tab, setTab] = useState('hr');
@@ -23,7 +23,7 @@ export function LiveView() {
   <//>`;
 }
 
-function useLiveBuffer() {
+export function useLiveBuffer() {
   const [pts, setPts] = useState([]);
   const rr = useRef([]);
   useEffect(() => strap.onHR((bpm, r) => {
@@ -104,7 +104,7 @@ function WorkoutRecorder() {
   </div>`;
 }
 
-function HRVCheck() {
+export function HRVCheck() {
   const [state, setState] = useState('idle');
   const [left, setLeft] = useState(0);
   const [res, setRes] = useState(null);
@@ -145,7 +145,7 @@ function HRVCheck() {
   </div>`;
 }
 
-function Breathe() {
+export function Breathe() {
   const [on, setOn] = useState(false);
   const [rate, setRate] = useState(6);
   const [phase, setPhase] = useState('Listo');

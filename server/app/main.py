@@ -364,11 +364,35 @@ async def weekly_send(wkey: str):
 
 # ===================================================================== workouts
 
-def workout_dict(r) -> dict:
+def workout_dict(r, route: bool = False) -> dict:
     d = dict(r)
     d["zones"] = jload(d.get("zones"), [])
     d["strong"] = jload(d.get("strong"))
+    raw_route = d.pop("route", None)
+    d["hasRoute"] = bool(raw_route)
+    if route:
+        d["route"] = jload(raw_route, [])
     return d
+
+
+def gpx(w: dict) -> str:
+    """GPX 1.1 track of a workout route (with heart rate as a Garmin TrackPointExtension)."""
+    import datetime as _dt
+    from xml.sax.saxutils import escape
+    pts = []
+    for p in w.get("route") or []:
+        t, lat, lon = p[0], p[1], p[2]
+        ele = p[3] if len(p) > 3 else None
+        hr = p[4] if len(p) > 4 else None
+        when = _dt.datetime.fromtimestamp(t, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        pts.append(f'<trkpt lat="{lat:.6f}" lon="{lon:.6f}">' + (f"<ele>{ele:.1f}</ele>" if ele is not None else "")
+                   + f"<time>{when}</time>"
+                   + (f"<extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>{int(hr)}</gpxtpx:hr></gpxtpx:TrackPointExtension></extensions>" if hr else "")
+                   + "</trkpt>")
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Pulso" xmlns="http://www.topografix.com/GPX/1/1" '
+            'xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">'
+            f"<trk><name>{escape(w.get('name') or 'Entreno')}</name><type>{escape(w.get('sport') or '')}</type><trkseg>"
+            + "".join(pts) + "</trkseg></trk></gpx>\n")
 
 
 @app.get("/api/workouts")
@@ -385,7 +409,7 @@ async def workout(uid: str):
     r = db.one("SELECT * FROM workouts WHERE uid=?", (uid,))
     if not r:
         raise HTTPException(404)
-    w = workout_dict(r)
+    w = workout_dict(r, route=True)
     try:
         w["series"] = await engine("series", {"dataDir": str(SAMPLES_DIR), "from": w["start"] - 300, "to": w["end"] + 300, "step": 60})
     except EngineError:
@@ -396,14 +420,27 @@ async def workout(uid: str):
 @app.post("/api/workouts")
 async def add_workout(p: dict = Body(...)):
     uid = p.get("uid") or f"{p.get('source', 'manual')}-{p['start']}"
-    db.ex("""INSERT OR REPLACE INTO workouts(uid, source, start, end, sport, name, strain, avg_hr, max_hr, kcal, distance_km, notes, zones, created_at)
-             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+    route = p.get("route") or None
+    if route:   # [[t, lat, lon, ele?, hr?], …] — keep it bounded (≈ 1 point/2 s for 12 h)
+        route = [[float(x) if x is not None else None for x in pt[:5]] for pt in route[:25000] if len(pt) >= 3]
+    db.ex("""INSERT OR REPLACE INTO workouts(uid, source, start, end, sport, name, strain, avg_hr, max_hr, kcal, distance_km, notes, zones, route, created_at)
+             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
           (uid, p.get("source", "manual"), int(p["start"]), int(p["end"]), p.get("sport", "Entrenamiento"), p.get("name", "Entrenamiento"),
            p.get("strain"), p.get("avgHR"), p.get("maxHR"), p.get("kcal"), p.get("distanceKm"), p.get("notes", ""),
-           json.dumps(p.get("zones") or []), now()))
+           json.dumps(p.get("zones") or []), json.dumps(route) if route else None, now()))
     if p.get("strain") is None:
         await recompute(uid)
     return workout_dict(db.one("SELECT * FROM workouts WHERE uid=?", (uid,)))
+
+
+@app.get("/api/workouts/{uid}/gpx")
+async def workout_gpx(uid: str):
+    r = db.one("SELECT * FROM workouts WHERE uid=?", (uid,))
+    if not r or not r["route"]:
+        raise HTTPException(404, "este entreno no tiene ruta")
+    w = workout_dict(r, route=True)
+    name = f"pulso-{day_key(w['start'])}-{(w.get('sport') or 'entreno').lower()}.gpx".replace(" ", "-")
+    return Response(gpx(w), media_type="application/gpx+xml", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.put("/api/workouts/{uid}")

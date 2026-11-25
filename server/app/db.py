@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS notified (key TEXT PRIMARY KEY, ts INTEGER NOT NULL);
 
 with _lock:
     _conn.executescript(SCHEMA)
+    # columns added after the first release (CREATE TABLE IF NOT EXISTS does not add them)
+    _cols = {r[1] for r in _conn.execute("PRAGMA table_info(workouts)").fetchall()}
+    if "route" not in _cols:
+        _conn.execute("ALTER TABLE workouts ADD COLUMN route TEXT")   # GPS points [[t, lat, lon, ele, hr], …]
 
 
 def q(sql: str, args: tuple | list = ()) -> list[sqlite3.Row]:

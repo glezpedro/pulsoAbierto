@@ -312,3 +312,42 @@ export function Gauge({ value, color = C.accent, size = 120, label, text }) {
     <text x="60" y="58" text-anchor="middle" class="ring-value" font-size="24">${text ?? n(value)}</text>
   </svg>`;
 }
+
+// ------------------------------------------------------------ route (GPS) without map tiles
+/** Route drawn from its own points (equirectangular projection, north up), coloured by heart rate
+ *  when available. route: [[t, lat, lon, ele?, hr?], …] */
+export function RouteMap({ route, height = 220, color = C.accent }) {
+  const [ref, W] = useWidth();
+  const pts = (route || []).filter((p) => p[1] != null && p[2] != null);
+  if (pts.length < 2) return html`<div ref=${ref} class="small muted">Sin ruta GPS.</div>`;
+  const lat0 = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  const kx = Math.cos((lat0 * Math.PI) / 180);
+  const xs = pts.map((p) => p[2] * kx), ys = pts.map((p) => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const pad = 14, w = W - 2 * pad, h = height - 2 * pad;
+  const sc = Math.min(w / Math.max(maxX - minX, 1e-9), h / Math.max(maxY - minY, 1e-9));
+  const ox = pad + (w - (maxX - minX) * sc) / 2, oy = pad + (h - (maxY - minY) * sc) / 2;
+  const X = (i) => ox + (xs[i] - minX) * sc, Y = (i) => oy + (maxY - ys[i]) * sc;
+  const hrs = pts.map((p) => p[4]).filter((v) => v);
+  const lo = hrs.length ? Math.min(...hrs) : 0, hi = hrs.length ? Math.max(...hrs) : 1;
+  const hrColor = (v) => { if (!v) return color; const t = (v - lo) / Math.max(1, hi - lo); return `hsl(${200 - 200 * t} 85% 55%)`; };
+  const segs = [];
+  for (let i = 1; i < pts.length; i++) segs.push(html`<line x1=${X(i - 1)} y1=${Y(i - 1)} x2=${X(i)} y2=${Y(i)} stroke=${hrs.length ? hrColor(pts[i][4]) : color} stroke-width="3.5" stroke-linecap="round" />`);
+  return html`<div ref=${ref} class="hkchart route-map">
+    <svg width=${W} height=${height} style="display:block">
+      <rect x="0" y="0" width=${W} height=${height} rx="14" fill="var(--panel-2)" />
+      ${segs}
+      <circle cx=${X(0)} cy=${Y(0)} r="6" fill="var(--green)" stroke="var(--panel)" stroke-width="2" />
+      <circle cx=${X(pts.length - 1)} cy=${Y(pts.length - 1)} r="6" fill="var(--red)" stroke="var(--panel)" stroke-width="2" />
+    </svg>
+    ${hrs.length > 0 && html`<div class="legend"><span><i style="background:hsl(200 85% 55%)"></i>FC ${Math.round(lo)}</span><span><i style="background:hsl(0 85% 55%)"></i>FC ${Math.round(hi)}</span><span><i style="background:var(--green)"></i>Salida</span><span><i style="background:var(--red)"></i>Llegada</span></div>`}
+  </div>`;
+}
+
+/** Great-circle distance in metres (haversine). */
+export function distM(a, b) {
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}

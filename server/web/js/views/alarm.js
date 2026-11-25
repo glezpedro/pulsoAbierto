@@ -2,7 +2,7 @@
 import { html, useState } from '../../vendor/preact-htm.js';
 import { useStore, store, api, toast, useEventTarget } from '../core.js';
 import { HKCard } from '../ui.js';
-import { strap } from '../ble/strap.js';
+import { strap, nextAlarm } from '../ble/strap.js';
 
 const fmtTime = (d) => d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 const fmtDay = (d) => {
@@ -70,6 +70,33 @@ export function AlarmControl() {
       <button class="btn small primary" disabled=${!strap.connected || busy} onClick=${program}>${at ? 'Cambiar' : 'Programar'}</button>
       ${at && html`<button class="btn small" disabled=${!strap.connected || busy} onClick=${remove}>Quitar</button>`}</div>
     ${!strap.connected && html`<div class="tiny muted">Conecta la pulsera para programarlo o quitarlo. Una vez programado, suena aunque el móvil esté apagado o lejos.</div>`}
+    <${WeeklySchedule} />
     <div class="small"><b>Para pararlo:</b> ${STOP_HINT.replace('Cuando vibre: d', 'D')}</div>
+  </div>`;
+}
+
+/** Repetir cada semana: Pulso programa la siguiente alarma cada vez que se conecta a la pulsera. */
+function WeeklySchedule() {
+  const { status } = useStore();
+  const cur = status?.settings?.alarmSchedule;
+  const [on, setOn] = useState(!!cur);
+  const [time, setTime] = useState(cur?.time || status?.profile?.wakeTime || '07:00');
+  const [days, setDays] = useState(cur?.days || [1, 2, 3, 4, 5]);
+  const save = async (o = on, t = time, d = days) => {
+    const sch = o && d.length ? { time: t, days: [...d].sort() } : null;
+    try {
+      await api('/settings', { method: 'PUT', json: { alarmSchedule: sch } });
+      const s = await api('/status'); store.set({ status: s }); strap.serverSettings = s.settings;
+      if (sch && strap.connected) await strap.applyAlarmSchedule();
+      toast(sch ? 'Despertador semanal guardado' : 'Despertador semanal desactivado');
+    } catch (e) { toast(e.message); }
+  };
+  const next = on && days.length ? nextAlarm({ time, days }) : null;
+  return html`<div class="col" style="gap:8px;border-top:0.5px solid var(--line);padding-top:10px">
+    <label class="switch"><span><b>Repetir cada semana</b></span><input type="checkbox" checked=${on} onChange=${(e) => { setOn(e.target.checked); save(e.target.checked); }} /></label>
+    ${on && html`<div class="row"><input type="time" value=${time} onChange=${(e) => { setTime(e.target.value); save(on, e.target.value); }} style="width:auto" />
+      <div class="chips">${['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((l, i) => html`<button class=${`chip ${days.includes(i + 1) ? 'on' : ''}`}
+        onClick=${() => { const d = days.includes(i + 1) ? days.filter((x) => x !== i + 1) : [...days, i + 1]; setDays(d); save(on, time, d); }}>${l}</button>`)}</div></div>
+      <div class="tiny muted">${next ? `Próximo: ${fmtDay(next)} a las ${fmtTime(next)}. ` : ''}La pulsera solo guarda una alarma: Pulso programa la siguiente cada vez que se conecta, así que abre Bluefy al menos una vez al día.</div>`}
   </div>`;
 }

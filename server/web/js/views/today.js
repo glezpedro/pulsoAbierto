@@ -34,7 +34,7 @@ export function TodayView() {
   return html`<${TodayDetail} onBack=${mobile ? () => setDetail(false) : null} />`;
 }
 
-function TodayDetail({ onBack }) {
+export function TodayDetail({ onBack }) {
   const { date, status } = useStore();
   const { data, loading, error } = useApi(`/day/${date}`, [date]);
   const plan = useApi(isToday(date) ? '/plan/today' : null, [date]);

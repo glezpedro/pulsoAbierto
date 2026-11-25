@@ -6,6 +6,8 @@ import { useApi, useStore, store, n, hm, hhmm, mean, sd, slope, C, recColor, key
 import { Card, Spinner, Empty } from '../ui.js';
 import { Icon } from '../icons.js';
 import { BarChart, LineChart } from '../charts.js';
+import { strap } from '../ble/strap.js';
+import { useEventTarget } from '../core.js';
 import { PERIODS, rangeOf, rangeTitle, buckets, bucketMean, bucketTitle, RangeNav } from '../period.js';
 
 /** Metric catalogue. day(rep, data) → intraday chart description (optional). */
@@ -115,6 +117,7 @@ export function MetricView({ mkey }) {
         : html`<${RangeNav} period=${period} end=${end} setEnd=${setEnd} />`}</div>
     </div>
     <div class="seg seg-full">${options.map(([v, l]) => html`<button class=${period === v ? 'on' : ''} onClick=${() => { setPeriod(v); if (v !== 'D') setEnd(date); }}>${l}</button>`)}</div>
+    ${(mkey === 'hr' || mkey === 'rhr') && html`<${LiveCard} />`}
     ${isDay ? html`<${MetricDay} cfg=${cfg} date=${date} />` : html`<${MetricRange} cfg=${cfg} period=${period} frm=${frm} to=${to} days=${days} />`}
   </div>`;
 }
@@ -168,7 +171,7 @@ function MetricDay({ cfg, date }) {
 function MetricRange({ cfg, period, frm, to, days }) {
   const rows = useApi(`/days?frm=${frm}&to=${to}`, [frm, to]);
   const prev = useApi(`/days?frm=${addDays(frm, -days)}&to=${addDays(frm, -1)}`, [frm, days]);
-  const base = useApi(cfg.vital ? `/days?to=${to}&days=60` : null, [to]);
+  const base = useApi(`/days?to=${to}&days=30`, [to]);
   const [sel, setSel] = useState(null);
   useEffect(() => setSel(null), [frm, to, period]);
   const color = cfg.color();
@@ -207,7 +210,7 @@ function MetricRange({ cfg, period, frm, to, days }) {
   const tr = slope(list.map((_, i) => i), list.map(val));
   const typical = cfg.vital && base.data ? (() => {
     const b = base.data.map(val).filter((v) => v != null);
-    if (b.length < 7) return null;
+    if (b.length < 7 || !cfg.vital) return null;
     const mu = mean(b), s = sd(b) || 0;
     return [mu - 1.5 * s, mu + 1.5 * s];
   })() : null;
@@ -227,9 +230,11 @@ function MetricRange({ cfg, period, frm, to, days }) {
         <div class="kv"><span>Periodo anterior</span><b class=${dCls}>${delta == null ? '–' : `${delta > 0 ? '+' : ''}${n(delta, cfg.dec)}`}<small>${delta == null ? '' : cfg.unit}</small></b></div>
         <div class="kv"><span>Tendencia</span><b>${tr == null ? '–' : `${tr * 7 > 0 ? '+' : ''}${n(tr * 7, cfg.dec || 1)}`}<small>${tr == null ? '' : '/sem'}</small></b></div>
         <div class="kv"><span>Días con datos</span><b>${vals.length}<small>de ${list.length}</small></b></div>
-        ${typical && html`<div class="kv" style="grid-column:span 2"><span>Tu rango habitual (60 días)</span><b>${n(typical[0], cfg.dec)}–${n(typical[1], cfg.dec)}<small>${cfg.unit}</small></b></div>`}
+        ${typical && html`<div class="kv" style="grid-column:span 2"><span>Rango habitual (media ± 1,5 DE, 30 días)</span><b>${n(typical[0], cfg.dec)}–${n(typical[1], cfg.dec)}<small>${cfg.unit}</small></b></div>`}
       </div><//>
     <${About} cfg=${cfg} span="5" />
+    ${!cfg.relative && html`<${NormalRange} cfg=${cfg} base=${base.data || list} val=${val} />`}
+    <${Nerd} cfg=${cfg} vals=${vals} list=${list} val=${val} />
     <${Card} span="12" title="Todos los datos" icon=${html`<${Icon} n="calendar" />`} color=${color}>
       <details><summary class="small" style="cursor:pointer;color:var(--accent)">Mostrar los ${vals.length} días</summary>
         <div class="col" style="gap:0;margin-top:6px">${list.slice().reverse().filter((d) => val(d) != null).map((d) => html`<a class="stat" href="#/hoy" onClick=${() => store.set({ date: d.dayKey })} style="color:inherit">
@@ -242,4 +247,60 @@ function MetricRange({ cfg, period, frm, to, days }) {
 function About({ cfg, span = 12 }) {
   return html`<${Card} span=${span} title=${`Acerca de: ${cfg.short || cfg.title}`} icon=${html`<${Icon} n="info" />`} color=${cfg.color()}>
     <div class="metric-about">${cfg.about.map((p) => html`<p>${p}</p>`)}</div><//>`;
+}
+
+/** «En directo»: the strap's live heart rate while connected (not stored: it is the live signal). */
+function LiveCard() {
+  useEventTarget(strap);
+  const [pts, setPts] = useState([]);
+  useEffect(() => strap.onHR((b) => { if (b > 25) setPts((p) => [...p.slice(-89), { t: Date.now() / 1000, v: b }]); }), []);
+  useEffect(() => { if (strap.connected && !strap.s.liveOn) strap.setLive(true).catch(() => {}); return () => { if (strap.connected && strap.s.liveOn) strap.setLive(false).catch(() => {}); }; }, [strap.connected]);
+  if (!strap.connected) return null;
+  const vs = pts.map((p) => p.v);
+  return html`<section class="card hero-card" style="--cat:var(--heart)">
+    <div class="row between"><span class="sess-hr"><span style="color:var(--heart)"><${Icon} n="heart" size=${26} /></span><span class="bh-value">${strap.s.liveHR ?? '--'}<small>lpm</small></span></span>
+      <span class="pill live-pill"><span class="live-dot"></span>EN DIRECTO</span></div>
+    ${pts.length > 1 && html`<${LineChart} points=${pts} color=${C.hr} height=${80} gap=${20} />`}
+    <span class="tiny muted">${vs.length ? `Últimas ${vs.length} lecturas: ${Math.min(...vs)}–${Math.max(...vs)} lpm. ` : ''}No se guarda: es la señal en directo, no el registro de tu día.</span>
+  </section>`;
+}
+
+/** «Tu rango normal»: lowest, typical (median) and highest of your own last 30 days. */
+function NormalRange({ cfg, base, val }) {
+  const v = base.map(val).filter((x) => x != null).sort((a, b) => a - b);
+  if (v.length < 3) return html`<${Card} span="12" title="Tu rango normal" icon=${html`<${Icon} n="calendar" />`} color=${cfg.color()}>
+    <div class="small muted">Se calcula con al menos 3 de tus días; llevas ${v.length}.</div><//>`;
+  const med = v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
+  return html`<${Card} span="12" title="Tu rango normal" icon=${html`<${Icon} n="calendar" />`} color=${cfg.color()}>
+    <div class="normal-trio">
+      <div><b>${n(v[0], cfg.dec)}</b><span>Más bajo</span></div>
+      <div><b>${n(med, cfg.dec)}</b><span>Típico</span></div>
+      <div><b>${n(v[v.length - 1], cfg.dec)}</b><span>Más alto</span></div>
+    </div>
+    <div class="tiny muted" style="text-align:center">A partir de ${v.length} de tus días (últimos 30)${cfg.unit ? ` · ${cfg.unit}` : ''}</div><//>`;
+}
+
+/** «Datos para curiosos»: the figures behind the picture. */
+function Nerd({ cfg, vals, list, val }) {
+  if (vals.length < 2) return null;
+  const s = [...vals].sort((a, b) => a - b);
+  const q = (p) => s[Math.min(s.length - 1, Math.max(0, Math.round(p * (s.length - 1))))];
+  const mu = mean(vals), dev = sd(vals);
+  const last = [...list].reverse().map(val).find((x) => x != null);
+  const z = dev ? (last - mu) / dev : null;
+  const tr = slope(list.map((_, i) => i), list.map(val));
+  const row = (k, v) => html`<div class="stat"><span>${k}</span><span>${v}</span></div>`;
+  return html`<details class="card span-12 nerd">
+    <summary><${Icon} n="spark" size=${16} /> Datos para curiosos <span class="tiny muted">· las cifras detrás de la gráfica</span></summary>
+    <div class="col" style="gap:0">
+      ${row('Días con dato', vals.length)}
+      ${row('Media', `${n(mu, cfg.dec + 1)} ${cfg.unit}`)}
+      ${row('Mediana', `${n(q(0.5), cfg.dec)} ${cfg.unit}`)}
+      ${row('Desviación típica', dev == null ? '–' : `${n(dev, cfg.dec + 1)} ${cfg.unit}`)}
+      ${row('Coeficiente de variación', dev && mu ? `${n((dev / Math.abs(mu)) * 100, 1)} %` : '–')}
+      ${row('Percentiles 10 – 90', `${n(q(0.1), cfg.dec)} – ${n(q(0.9), cfg.dec)} ${cfg.unit}`)}
+      ${row('Pendiente', tr == null ? '–' : `${tr > 0 ? '+' : ''}${n(tr, cfg.dec + 2)} ${cfg.unit}/día`)}
+      ${row('Último valor frente a la media', z == null ? '–' : `${z > 0 ? '+' : ''}${n(z, 2)} desviaciones típicas`)}
+    </div>
+  </details>`;
 }

@@ -5,7 +5,11 @@ import { Icon } from './icons.js';
 import { strap, CONN } from './ble/strap.js';
 import { SyncButton, StatusPill } from './layout.js';
 
-import { TodayView } from './views/today.js';
+import { TodayView, TodayDetail } from './views/today.js';
+import { HomeView } from './views/home.js';
+import { SaludView, ExploreList } from './views/salud.js';
+import { EntrenoView, SessionView } from './views/entreno.js';
+import { BienestarView } from './views/bienestar.js';
 import { SleepView } from './views/sleep.js';
 import { RecoveryView } from './views/recovery.js';
 import { LoadView } from './views/load.js';
@@ -20,23 +24,35 @@ import { JournalView } from './views/journal.js';
 import { SettingsView } from './views/settings.js';
 import { MetricView } from './views/metric.js';
 
+const DayView = () => html`<${TodayDetail} onBack=${() => { location.hash = '#/hoy'; }} />`;
+const ExploreView = () => html`<div class="page"><div class="topbar"><h1>Explorar</h1><${StatusPill} /></div><${ExploreList} /></div>`;
+
 export const ROUTES = [
-  { id: 'hoy', title: 'Resumen', icon: 'heart', view: TodayView, group: 'Diario' },
-  { id: 'sueno', title: 'Sueño', icon: 'sleep', view: SleepView, group: 'Diario' },
-  { id: 'recuperacion', title: 'Recuperación', icon: 'heart', view: RecoveryView, group: 'Diario' },
-  { id: 'carga', title: 'Esfuerzo y carga', icon: 'bolt', view: LoadView, group: 'Diario' },
+  { id: 'hoy', title: 'Inicio', icon: 'home', view: HomeView, group: 'Pulso' },
+  { id: 'salud', title: 'Salud', icon: 'heart', view: SaludView, group: 'Pulso' },
+  { id: 'sueno', title: 'Sueño', icon: 'sleep', view: SleepView, group: 'Pulso' },
+  { id: 'entreno', title: 'Entreno', icon: 'dumbbell', view: EntrenoView, group: 'Pulso' },
+  { id: 'bienestar', title: 'Bienestar', icon: 'leaf', view: BienestarView, group: 'Pulso' },
+  { id: 'dia', title: 'El día en detalle', icon: 'today', view: DayView, group: 'Análisis' },
+  { id: 'recuperacion', title: 'Recuperación', icon: 'heart', view: RecoveryView, group: 'Análisis' },
+  { id: 'carga', title: 'Esfuerzo y carga', icon: 'bolt', view: LoadView, group: 'Análisis' },
   { id: 'tendencias', title: 'Tendencias', icon: 'trend', view: TrendsView, group: 'Análisis' },
   { id: 'semanal', title: 'Informe semanal', icon: 'report', view: WeeklyView, group: 'Análisis' },
   { id: 'diario', title: 'Diario de hábitos', icon: 'book', view: JournalView, group: 'Análisis' },
-  { id: 'entreno', title: 'Entreno', icon: 'dumbbell', view: TrainingView, group: 'Entreno' },
-  { id: 'directo', title: 'En directo', icon: 'live', view: LiveView, group: 'Entreno' },
-  { id: 'cuerpo', title: 'Medidas', icon: 'body', view: BodyView, group: 'Entreno' },
+  { id: 'plan', title: 'Plan y progreso', icon: 'dumbbell', view: TrainingView, group: 'Más' },
+  { id: 'directo', title: 'En directo', icon: 'live', view: LiveView, group: 'Más' },
+  { id: 'cuerpo', title: 'Medidas', icon: 'body', view: BodyView, group: 'Más' },
+  { id: 'sesion', title: 'Sesión', icon: 'play', view: SessionView, group: 'Más', hidden: true },
+  { id: 'mas', title: 'Explorar', icon: 'grid', view: ExploreView, group: 'Más', hidden: true },
   // Coach IA oculto de la navegación mientras no se use (la API de Anthropic es de pago). Sigue en #/coach.
-  { id: 'coach', title: 'Coach IA', icon: 'spark', view: CoachView, group: 'Entreno', hidden: true },
+  { id: 'coach', title: 'Coach IA', icon: 'spark', view: CoachView, group: 'Más', hidden: true },
   { id: 'pulsera', title: 'Pulsera', icon: 'watch', view: StrapView, group: 'Sistema' },
   { id: 'ajustes', title: 'Ajustes', icon: 'gear', view: SettingsView, group: 'Sistema' },
 ];
-const TABS = ['hoy', 'sueno', 'carga', 'pulsera', 'mas'];
+const TABS = ['hoy', 'salud', 'sueno', 'entreno', 'bienestar'];
+// pantallas que, en el móvil, se consideran dentro de cada pestaña
+const TAB_OF = { dia: 'hoy', pulsera: 'hoy', ajustes: 'hoy', recuperacion: 'salud', carga: 'salud', tendencias: 'salud', semanal: 'salud', mas: 'salud',
+  plan: 'entreno', directo: 'entreno', sesion: 'entreno', diario: 'bienestar', cuerpo: 'bienestar' };
 
 function useRoute() {
   const parse = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || 'hoy');
@@ -78,52 +94,21 @@ setTimeout(() => strap.repairDecoding().then((r) => { if (r?.stored || r?.remove
 function Sidebar({ route }) {
   const visible = ROUTES.filter((r) => !r.hidden);
   const groups = [...new Set(visible.map((r) => r.group))];
+  const active = (id) => route === id || (route.startsWith('m/') && id === 'salud');
   return html`<aside class="sidebar">
     <div class="brand"><img class="brand-logo" src="/icon.svg" alt="" /><b>Pulso</b></div>
     <div class="hide-mobile"><${SyncButton} /></div>
-    <nav class="nav nav-group"><a href="#/mas" class=${route === 'mas' ? 'active' : ''}><span class="ic" style="background:var(--accent)"><${Icon} n="grid" size=${16} /></span>Explorar</a></nav>
     ${groups.map((g) => html`<nav class="nav nav-group"><span class="label">${g}</span>
-      ${visible.filter((r) => r.group === g).map((r) => html`<a href=${`#/${r.id}`} class=${route === r.id ? 'active' : ''}><span class="ic" style=${{ background: CAT[r.icon] || 'var(--accent)' }}><${Icon} n=${r.icon} size=${16} /></span>${r.title}</a>`)}
+      ${visible.filter((r) => r.group === g).map((r) => html`<a href=${`#/${r.id}`} class=${active(r.id) ? 'active' : ''}><span class="ic" style=${{ background: CAT[r.icon] || 'var(--accent)' }}><${Icon} n=${r.icon} size=${16} /></span>${r.title}</a>`)}
     </nav>`)}
   </aside>`;
 }
 
 function TabBar({ route }) {
-  const items = { hoy: ['Resumen', 'heart'], sueno: ['Sueño', 'sleep'], carga: ['Carga', 'bolt'], pulsera: ['Pulsera', 'watch'], mas: ['Explorar', 'grid'] };
-  const inMore = !TABS.includes(route) && !route.startsWith('m/');
-  return html`<nav class="tabbar">${TABS.map((t) => html`<a href=${`#/${t}`} class=${route === t || (t === 'mas' && inMore) || (t === 'hoy' && route.startsWith('m/')) ? 'active' : ''}>
-    <span class="ic"><${Icon} n=${items[t][1]} size=${24} /></span>${items[t][0]}</a>`)}</nav>`;
-}
-
-// Explorar (como «Explorar» de Salud): categorías con sus datos y el resto de secciones.
-const CATEGORIES = [
-  { t: 'Actividad', icon: 'flame', c: 'var(--activity)', items: [['Esfuerzo', '#/m/strain'], ['Energía activa', '#/m/activeKcal'], ['Energía total', '#/m/kcal'], ['Pasos', '#/m/steps'], ['Esfuerzo y carga', '#/carga'], ['Entreno', '#/entreno']] },
-  { t: 'Corazón', icon: 'heart', c: 'var(--heart)', items: [['Frecuencia cardiaca', '#/m/hr'], ['Frecuencia cardiaca en reposo', '#/m/rhr'], ['Variabilidad de la frecuencia cardiaca', '#/m/hrv'], ['Recuperación', '#/m/recovery'], ['Medición en directo', '#/directo']] },
-  { t: 'Respiración', icon: 'lungs', c: 'var(--resp)', items: [['Frecuencia respiratoria', '#/m/resp'], ['Oxígeno en sangre (exp.)', '#/m/spo2']] },
-  { t: 'Sueño', icon: 'sleep', c: 'var(--sleep)', items: [['Sueño', '#/sueno'], ['Puntuación de sueño', '#/m/sleepScore']] },
-  { t: 'Constantes', icon: 'temp', c: 'var(--body)', items: [['Temperatura de la piel', '#/m/skinTemp'], ['Recuperación y constantes', '#/recuperacion']] },
-  { t: 'Salud mental', icon: 'mind', c: 'var(--mind)', items: [['Estrés', '#/m/avgStress'], ['Diario de hábitos', '#/diario']] },
-  { t: 'Medidas corporales', icon: 'body', c: 'var(--body)', items: [['Peso y medidas', '#/cuerpo']] },
-];
-
-function MoreView() {
-  const [q, setQ] = useState('');
-  const match = (x) => !q || x.toLowerCase().includes(q.toLowerCase());
-  const others = ROUTES.filter((r) => !TABS.includes(r.id) && !r.hidden && ['tendencias', 'semanal', 'pulsera', 'ajustes'].includes(r.id));
-  return html`<div class="page">
-    <div class="topbar"><h1>Explorar</h1><${StatusPill} /></div>
-    <input type="search" class="search" placeholder="Buscar" value=${q} onInput=${(e) => setQ(e.target.value)} />
-    <div class="section-title">Categorías de salud</div>
-    <div class="cat-grid">${CATEGORIES.filter((c) => match(c.t) || c.items.some(([t]) => match(t))).map((c) => html`
-      <details class="card cat-card" open=${!!q} style=${{ '--cat': c.c }}>
-        <summary><span class="ic" style=${{ background: c.c }}><${Icon} n=${c.icon} size=${17} /></span><span class="grow">${c.t}</span><span class="muted chev"><${Icon} n="chev" /></span></summary>
-        <div class="col" style="gap:0">${c.items.filter(([t]) => !q || match(t) || match(c.t)).map(([t, h]) => html`
-          <a class="list-item" href=${h} style="color:inherit;padding-left:42px"><span class="grow">${t}</span><span class="muted"><${Icon} n="chev" /></span></a>`)}</div>
-      </details>`)}</div>
-    <div class="section-title">Más</div>
-    <div class="card">${others.map((r) => html`
-      <a class="list-item" href=${`#/${r.id}`} style="color:inherit"><span class="ic" style=${{ background: CAT[r.icon] || 'var(--accent)' }}><${Icon} n=${r.icon} size=${17} /></span><span class="grow">${r.title}</span><span class="muted"><${Icon} n="chev" /></span></a>`)}
-    </div></div>`;
+  const items = { hoy: ['Inicio', 'home'], salud: ['Salud', 'heart'], sueno: ['Sueño', 'sleep'], entreno: ['Entreno', 'dumbbell'], bienestar: ['Bienestar', 'leaf'] };
+  const cur = TABS.includes(route) ? route : route.startsWith('m/') ? 'salud' : TAB_OF[route] || 'hoy';
+  return html`<nav class="tabbar">${TABS.map((t) => html`<a href=${`#/${t}`} class=${cur === t ? 'active' : ''}>
+    <span class="ic"><${Icon} n=${items[t][1]} size=${22} /></span>${items[t][0]}</a>`)}</nav>`;
 }
 
 function App() {
@@ -131,7 +116,7 @@ function App() {
   const st = useStore();
   const r = ROUTES.find((x) => x.id === route);
   const mkey = route.startsWith('m/') ? route.slice(2) : null;
-  const View = route === 'mas' ? MoreView : (r ? r.view : TodayView);
+  const View = r ? r.view : HomeView;
   return html`<div class="shell">
     <${Sidebar} route=${route} />
     <main class="main">${mkey ? html`<${MetricView} mkey=${mkey} key=${mkey} />` : html`<${View} />`}</main>

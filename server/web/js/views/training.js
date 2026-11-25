@@ -4,6 +4,8 @@ import { Card, Stat, ChartBox, Seg, Empty, Spinner, Modal, ZoneTable, ZoneBar, t
 import { Page } from '../layout.js';
 import { WorkoutTable } from './load.js';
 import { Icon } from '../icons.js';
+export const SOURCE_ES = { live: 'En directo', strap: 'Pulsera', strong: 'Strong', strava: 'Strava', manual: 'Manual', health: 'Salud' };
+import { RouteMap } from '../charts.js';
 
 const GOALS = [['hypertrophy', 'Hipertrofia'], ['strength', 'Fuerza'], ['fatLoss', 'Pérdida de grasa'], ['endurance', 'Resistencia'], ['hybrid', 'Híbrido'], ['health', 'Salud general']];
 const LEVELS = [['beginner', 'Principiante'], ['intermediate', 'Intermedio'], ['advanced', 'Avanzado']];
@@ -27,7 +29,7 @@ export function TrainingView() {
 }
 
 // ------------------------------------------------------------ plan
-function PlanTab() {
+export function PlanTab() {
   const plans = useApi('/plans');
   const today = useApi('/plan/today');
   const [builder, setBuilder] = useState(false);
@@ -110,7 +112,7 @@ function PlanBuilder({ open, onClose }) {
 }
 
 // ------------------------------------------------------------ history
-function HistoryTab({ onOpen }) {
+export function HistoryTab({ onOpen }) {
   const [src, setSrc] = useState('');
   const list = useApi(`/workouts?days=365${src ? `&source=${src}` : ''}`, [src]);
   const { status } = useStore();
@@ -129,7 +131,7 @@ function HistoryTab({ onOpen }) {
         <div class="row">
           <label class="btn small">${busy === 'strong' ? html`<span class="spinner"></span>` : html`<${Icon} n="plus" />`}Importar CSV de Strong<input type="file" accept=".csv,text/csv" onChange=${upload} hidden /></label>
           ${status?.strava?.connected && html`<button class="btn small" onClick=${stravaImport} disabled=${!!busy}>${busy === 'strava' ? html`<span class="spinner"></span>` : html`<${Icon} n="sync" />`}Importar Strava</button>`}
-          <a class="btn small" href="#/directo"><${Icon} n="live" />Grabar entreno</a>
+          <a class="btn small" href="#/sesion"><${Icon} n="play" />Grabar entreno</a>
         </div>
         <select value=${src} onChange=${(e) => setSrc(e.target.value)} style="width:auto">
           <option value="">Todas las fuentes</option><option value="strap">Detectados por la pulsera</option><option value="live">Grabados en directo</option>
@@ -140,7 +142,7 @@ function HistoryTab({ onOpen }) {
   </div>`;
 }
 
-function WorkoutModal({ uid, onClose }) {
+export function WorkoutModal({ uid, onClose }) {
   const w = useApi(uid ? `/workouts/${encodeURIComponent(uid)}` : null, [uid]);
   const { status } = useStore();
   const [busy, setBusy] = useState('');
@@ -151,7 +153,7 @@ function WorkoutModal({ uid, onClose }) {
   const rename = async () => { const name = prompt('Nombre del entreno', d.name); if (name) { await api(`/workouts/${encodeURIComponent(uid)}`, { method: 'PUT', json: { name } }); w.reload(); } };
   return html`<${Modal} open=${true} onClose=${onClose} title=${d?.name || 'Entreno'}>
     ${!d ? html`<${Spinner} />` : html`
-      <div class="row" style="gap:6px"><span class="pill">${d.source}</span><span class="pill">${d.sport}</span>${d.strava_uploaded ? html`<span class="pill" style="color:#fc4c02">Subido a Strava</span>` : null}</div>
+      <div class="row" style="gap:6px"><span class="pill">${SOURCE_ES[d.source] || d.source}</span><span class="pill">${d.sport}</span>${d.strava_uploaded ? html`<span class="pill" style="color:#fc4c02">Subido a Strava</span>` : null}</div>
       <div class="tiles">
         <div class="tile"><div class="t">Esfuerzo</div><div class="v" style=${{ color: C.strain }}>${n(d.strain, 1)}</div></div>
         <div class="tile"><div class="t">Duración</div><div class="v">${hm((d.end - d.start) / 60)}</div></div>
@@ -160,6 +162,7 @@ function WorkoutModal({ uid, onClose }) {
         ${d.distance_km ? html`<div class="tile"><div class="t">Distancia</div><div class="v">${n(d.distance_km, 2)}<small>km</small></div></div>` : null}
       </div>
       <div class="small muted">${new Date(d.start * 1000).toLocaleString('es-ES')} → ${hhmm(d.end)}</div>
+      ${d.route?.length > 1 && html`<${RouteMap} route=${d.route} />`}
       ${d.series?.some((p) => p.hr) && html`<${ChartBox} height=${180} deps=${[d.uid]} config=${() => ({
         type: 'line', data: { datasets: [{ data: d.series.map((p) => ({ x: p.t * 1000, y: p.hr })), borderColor: C.hr, pointRadius: 0, borderWidth: 1.6, fill: true, backgroundColor: alpha(C.hr, 0.12), tension: 0.3 }] },
         options: { plugins: { legend: { display: false } }, scales: { x: timeX('minute'), y: { grace: '5%' } } } })} />`}
@@ -172,6 +175,7 @@ function WorkoutModal({ uid, onClose }) {
         <button class="btn small" disabled=${!!busy} onClick=${() => act('/recompute', 'POST', 'Esfuerzo recalculado')}>Recalcular esfuerzo</button>
         ${status?.strava?.connected && d.source !== 'strava' && html`<button class="btn small" disabled=${!!busy} onClick=${() => act('/strava', 'POST', 'Subido a Strava')}>${busy === '/strava' ? html`<span class="spinner"></span>` : null}Subir a Strava con FC</button>`}
         ${d.strava_id && html`<a class="btn small" href=${`https://www.strava.com/activities/${d.strava_id}`} target="_blank" rel="noopener">Ver en Strava</a>`}
+        ${d.hasRoute && html`<a class="btn small" href=${`/api/workouts/${encodeURIComponent(uid)}/gpx`} download><${Icon} n="download" />Descargar GPX</a>`}
         <button class="btn small danger" onClick=${del}>Eliminar</button>
       </div>`}
   <//>`;
@@ -180,7 +184,7 @@ function WorkoutModal({ uid, onClose }) {
 function groupSets(sets) { const g = {}; for (const s of sets) (g[s.exercise] ||= []).push(s); return g; }
 
 // ------------------------------------------------------------ progress
-function ProgressTab() {
+export function ProgressTab() {
   const st = useApi('/strong/stats');
   const [ex, setEx] = useState(null);
   const d = st.data;

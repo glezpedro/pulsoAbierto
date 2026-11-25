@@ -215,6 +215,7 @@ class Strap extends EventTarget {
     const lvl = b ? read.battery(b) : null;
     if (lvl != null) { this.set({ battery: lvl }); this.postBattery({ battery: lvl, charging: this.s.charging, mv: null, source: 'lectura' }); }
     await this.readAlarm();
+    await this.applyAlarmSchedule().catch(() => {});
     this.set({ conn: 'ready' });
     this.postDevice();
     // Battery readings every 60 s while connected: they feed the time-left / time-to-full estimates.
@@ -742,6 +743,20 @@ class Strap extends EventTarget {
       if (at && !st.alarmAt && at !== st.alarmCleared) this.saveAlarm(d, undefined, true);
     } catch { /* optional */ }
   }
+  /** Weekly alarm: the strap holds a single alarm, so on every connection the next occurrence of the
+   *  schedule ({time, days: 1 = Monday … 7 = Sunday}) is programmed if it isn't already. */
+  async applyAlarmSchedule() {
+    const sch = this.serverSettings?.alarmSchedule;
+    if (!sch?.time || !sch.days?.length) return;
+    const next = nextAlarm(sch);
+    if (!next) return;
+    const at = Math.floor(next / 1000);
+    const cur = this.s.alarmAt ?? this.serverSettings?.alarmAt;
+    if (cur && Math.abs(cur - at) < 60) return;
+    const ok = await this.setAlarm(next);
+    this.log(`Despertador semanal: ${ok ? 'programado' : 'la pulsera no lo confirmó'} para ${next.toLocaleString('es-ES', { weekday: 'long', hour: '2-digit', minute: '2-digit' })}`, ok ? 'info' : 'warn');
+  }
+
   /** Remember the programmed alarm on the server so every screen (and the desktop) can show it. */
   saveAlarm(date, rangAt, fromStrap = false) {
     const at = date ? Math.floor(date.getTime() / 1000) : null;
@@ -768,6 +783,17 @@ class Strap extends EventTarget {
 
   async acquireWake() { try { this.wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* optional */ } }
   releaseWake() { try { this.wakeLock?.release(); } catch { /* ignore */ } this.wakeLock = null; }
+}
+
+/** Next occurrence of a weekly schedule after `from` (Date), or null. */
+export function nextAlarm(sch, from = new Date()) {
+  const [h, m] = String(sch.time).split(':').map(Number);
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(from); d.setDate(d.getDate() + i); d.setHours(h, m, 0, 0);
+    const wd = ((d.getDay() + 6) % 7) + 1;          // 1 = lunes … 7 = domingo
+    if (d > from && sch.days.includes(wd)) return d;
+  }
+  return null;
 }
 
 export const strap = new Strap();

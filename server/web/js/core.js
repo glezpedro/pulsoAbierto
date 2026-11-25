@@ -145,6 +145,13 @@ readColors();
 try {
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readColors(); window.dispatchEvent(new Event('themechange')); store.bump(); });
 } catch { /* ignore */ }
+/** Apariencia: 'dark' (por defecto), 'light' o 'auto' (sigue al sistema). */
+export const getTheme = () => { try { return localStorage.getItem('pulso.theme') || 'dark'; } catch { return 'dark'; } };
+export function setTheme(t) {
+  try { localStorage.setItem('pulso.theme', t); } catch { /* ignore */ }
+  document.documentElement.dataset.theme = t;
+  readColors(); window.dispatchEvent(new Event('themechange')); store.bump();
+}
 /** '#rrggbb' + alpha → rgba() (falls back to the colour itself). */
 export function alpha(color, a) {
   const m = /^#([0-9a-f]{6})$/i.exec(color || '');
