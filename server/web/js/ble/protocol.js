@@ -325,6 +325,11 @@ export const payload = {
     const t = Math.floor(d.getTime() / 1000);
     const le = [t & 255, (t >>> 8) & 255, (t >>> 16) & 255, (t >>> 24) & 255];
     return [
+      // Official app on NORDIC 17.2.2.0 (HCI capture, ryanbr/noop#2869): [secs u32][0x00000439 u32][00].
+      // The 8/9-byte forms with zeros are accepted but NOT applied on that firmware.
+      { id: 'app9', bytes: [...le, 0x39, 0x04, 0x00, 0x00, 0x00] },
+      // whoop4-ble (AStrasler): 5 bytes, [secs u32][01]; the firmware checks payload length ≥ 5.
+      { id: 'ts+1', bytes: [...le, 0x01] },
       { id: 'ts+4', bytes: [...le, 0, 0, 0, 0] },
       { id: 'ts+5', bytes: [...le, 0, 0, 0, 0, 0] },
       { id: '1+ts+4', bytes: [1, ...le, 0, 0, 0, 0] },

@@ -201,11 +201,13 @@ class Strap extends EventTarget {
     await sleep(500);
     const hello = await this.send(CMD.getHello);
     if (hello) this.set({ serial: read.serial(hello) });
+    // The official app sets the clock right after the hello reply, before anything else. Without a valid
+    // clock the strap records nothing («RTC timestamp … is invalid; not saving data to flash»).
+    await this.syncClock();            // BEFORE the history: records must carry the right time
     const nm = await this.send(CMD.getAdvName);
     if (nm) this.set({ name: read.name(nm) || this.s.name });
     const v = await this.send(CMD.reportVersion);
     if (v) this.set({ firmware: read.versions(v) });
-    await this.syncClock();            // BEFORE the history: records must carry the right time
     await this.send(CMD.rawRealtime, [0]);
     const range = await this.send(CMD.getDataRange);
     if (range) this.log(`Rango de datos en la pulsera: ${hex(range.body)}`);
@@ -263,7 +265,7 @@ class Strap extends EventTarget {
       attempt++;
       const bytes = payload.setClockVariants().find((x) => x.id === vr.id).bytes;   // fresh time for every attempt
       const sc = await this.send(CMD.setClock, bytes);
-      await sleep(400);
+      await sleep(vr.id === 'app9' || vr.id === 'ts+1' ? 1500 : 400);   // give the RTC time to latch
       after = await this.send(CMD.getClock);
       tAfter = nowS();
       const o = after ? read.clockOffsetNear(after, tAfter, 120) : null;

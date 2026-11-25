@@ -140,8 +140,20 @@ test('firmware console logs (type 50) are read as text across frames', () => {
 test('SET_CLOCK layouts carry the same, current time', () => {
   const d = new Date(NOW * 1000);
   const v = payload.setClockVariants(d);
-  assert.deepEqual(v.map((x) => x.id), ['ts+4', 'ts+5', '1+ts+4', 'ts']);
-  assert.deepEqual(v[0].bytes, payload.setClock(d));
-  assert.equal(v[1].bytes.length, 9);
-  assert.deepEqual(v[2].bytes.slice(1, 5), le32(NOW));
+  assert.deepEqual(v.map((x) => x.id), ['app9', 'ts+1', 'ts+4', 'ts+5', '1+ts+4', 'ts']);
+  for (const x of v) assert.deepEqual(x.id === '1+ts+4' ? x.bytes.slice(1, 5) : x.bytes.slice(0, 4), le32(NOW));
+  assert.deepEqual(v[2].bytes, payload.setClock(d));
+  assert.equal(v[3].bytes.length, 9);
+});
+
+test('SET_CLOCK: official-app layout first (9 bytes with 0x439) and the 5-byte one', () => {
+  const v = payload.setClockVariants(new Date(1794217260 * 1000));
+  assert.equal(v[0].id, 'app9');
+  // same bytes as the official app's HCI capture: 2c95f16a 39040000 00
+  assert.deepEqual(v[0].bytes, [0x2c, 0x95, 0xf1, 0x6a, 0x39, 0x04, 0x00, 0x00, 0x00]);
+  assert.equal(v[1].id, 'ts+1');
+  assert.deepEqual(v[1].bytes, [0x2c, 0x95, 0xf1, 0x6a, 0x01]);
+  // full frame identical to the capture (seq 1): aa10005723010a2c95f16a3904000000bd1b4689
+  const f = buildFrame(TYPE.command, 1, CMD.setClock, v[0].bytes);
+  assert.equal(hex(f).replace(/ /g, ''), 'aa10005723010a2c95f16a3904000000bd1b4689');
 });
