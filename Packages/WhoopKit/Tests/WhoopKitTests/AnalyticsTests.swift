@@ -121,6 +121,20 @@ final class AnalyticsTests: XCTestCase {
         XCTAssertNotNil(rep.metrics.wakeups)
     }
 
+    /// An evening nap (20:00–21:00) counts, as long as it finished before the window edge.
+    func testEveningNapCounts() {
+        var gen = SyntheticGenerator(seed: 12)
+        let ds = day0
+        let night = SyntheticGenerator.DayPlan(bedtime: ds - 2 * 3600, wake: ds + 7 * 3600, restingHR: 52, rmssd: 70, workout: nil)
+        let nap = SyntheticGenerator.DayPlan(bedtime: ds + 20 * 3600, wake: ds + 21 * 3600, restingHR: 52, rmssd: 70, workout: nil)
+        let samples = gen.samples(from: ds - 6 * 3600, to: ds + 15 * 3600, plan: night)
+            + gen.samples(from: ds + 15 * 3600, to: ds + 23 * 3600, plan: nap)
+        let rep = DayAnalyzer.analyze(samples: samples, dayKey: "d", dayStart: ds, dayEnd: ds + 86400,
+                                      profile: PhysioProfile(), history: [], now: ds + 23 * 3600)
+        XCTAssertEqual(rep.naps.count, 1, "naps: \(rep.naps.map { ($0.start - ds) / 60 })")
+        XCTAssertGreaterThan(rep.metrics.napMin ?? 0, 30)
+    }
+
     func testTrainingLoad() {
         let s = TrainingLoad.summarize(dailyStrain: Array(repeating: 10, count: 21) + Array(repeating: 17, count: 7))
         XCTAssertNotNil(s.acwr)

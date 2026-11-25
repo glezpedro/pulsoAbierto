@@ -144,10 +144,11 @@ public enum DayAnalyzer {
             .max { $0.minutesAsleep < $1.minutesAsleep }
         // Naps: short sleeps that start after the main sleep and end the same day. A night that begins
         // before midnight ends tomorrow, so it is not a nap of today.
-        // The analysis window stops at midnight, so tonight's sleep shows up truncated: a nap must start
-        // before 20:00 and finish clear of the window edge.
+        // The analysis window stops at midnight (or now, for today), so tonight's sleep shows up truncated
+        // there: a nap must have finished at least 15 min before the window edge, and start before 22:00.
+        let napWindowEnd = min(dayEnd, now)
         let naps = sessions.filter { s in
-            s.start >= (main?.end ?? dayStart) && s.end <= dayEnd - 300 && s.start - dayStart < 20 * 3600
+            s.start >= (main?.end ?? dayStart) && s.end <= napWindowEnd - 900 && s.start - dayStart < 22 * 3600
                 && s != main && s.minutesAsleep >= 15 && (s.isNap || s.minutesAsleep < 150)
         }
         report.sleep = main

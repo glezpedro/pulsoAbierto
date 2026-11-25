@@ -10,7 +10,7 @@ from .core import (add_days, day_bounds, day_key, engine, now, physio, today_key
 log = logging.getLogger("pulso.analysis")
 
 # Bump when the engine adds or changes per-day metrics: stored days are re-analysed once at startup.
-ANALYSIS_VERSION = 2
+ANALYSIS_VERSION = 3
 
 _event = asyncio.Event()
 state = {"running": False, "current": None, "done": 0, "queued": 0, "lastRun": None, "lastError": None}
